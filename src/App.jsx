@@ -1,23 +1,24 @@
-import { useState } from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Sidebar from "./components/Sidebar";
 import SystemMonitor from "./pages/SystemMonitor";
+// import InstalledApps from "./pages/InstalledApps";
 import "./App.css";
 
 function App() {
-  const [showMonitor, setShowMonitor] = useState(false);
-
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <button
-        className="p-2 bg-blue-500 text-white rounded"
-        onClick={() => setShowMonitor(!showMonitor)}
-      >
-        {showMonitor ? "Hide System Monitor" : "Show System Monitor"}
-      </button>
-
-      {showMonitor && <SystemMonitor />}
-    </main>
+    <Router>
+      <div className="flex">
+        <Sidebar />
+        <main className="flex-1 p-4">
+          <h1>Welcome to Tauri + React</h1>
+          <Routes>
+            <Route path="/" element={<h2>Home Page</h2>} />
+            <Route path="/system-monitor" element={<SystemMonitor />} />
+            {/* <Route path="/apps" element={<InstalledApps />} /> */}
+          </Routes>
+        </main>
+      </div>
+    </Router>
   );
 }
 
