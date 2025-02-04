@@ -29,6 +29,14 @@ const Sidebar = () => {
             Running Apps
           </Link>
         </li>
+        <li>
+          <Link
+            to="/installed-apps"
+            className="block p-2 hover:bg-gray-700 rounded transition"
+          >
+            Installed Apps
+          </Link>
+        </li>
       </ul>
     </nav>
   );

@@ -1,7 +1,8 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
-import SystemMonitor from "./pages/SystemMonitor";
 import RunningApps from "./components/RunningApps";
+import InstalledApps from "./components/InstalledApps";
+import SystemMonitor from "./pages/SystemMonitor";
 import "./App.css";
 
 function App() {
@@ -15,7 +16,7 @@ function App() {
             <Route path="/" element={<h2>Home Page</h2>} />
             <Route path="/system-monitor" element={<SystemMonitor />} />
             <Route path="/running-apps" element={<RunningApps />} />
-            {/* <Route path="/apps" element={<InstalledApps />} /> */}
+            <Route path="/installed-apps" element={<InstalledApps />} />
           </Routes>
         </main>
       </div>
