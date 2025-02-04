@@ -5,6 +5,17 @@ use sysinfo::System;
 use tauri::command;
 
 #[command]
+fn get_running_apps() -> Vec<String> {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    sys.processes()
+        .iter()
+        .map(|(pid, process)| format!("{} (PID: {})", process.name().to_string_lossy(), pid))
+        .collect()
+}
+
+#[command]
 fn get_ram_usage() -> String {
     let mut sys = System::new_all();
     sys.refresh_memory();
@@ -21,7 +32,7 @@ fn get_ram_usage() -> String {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_ram_usage])
+        .invoke_handler(tauri::generate_handler![get_ram_usage, get_running_apps])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
 }

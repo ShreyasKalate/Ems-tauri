@@ -23,10 +23,10 @@ const Sidebar = () => {
         </li>
         <li>
           <Link
-            to="/apps"
+            to="/running-apps"
             className="block p-2 hover:bg-gray-700 rounded transition"
           >
-            Installed Apps
+            Running Apps
           </Link>
         </li>
       </ul>
