@@ -4,15 +4,18 @@ import { invoke } from "@tauri-apps/api/core";
 const InstalledApps = () => {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const fetchInstalledApps = async () => {
     setLoading(true);
+    setError(null);
     try {
       const result = await invoke("get_installed_apps");
       setApps(result);
     } catch (error) {
       console.error("Failed to fetch installed applications:", error);
-      setApps(["Error fetching data."]);
+      setError("Failed to fetch installed applications.");
+      setApps([]);
     } finally {
       setLoading(false);
     }
@@ -23,21 +26,46 @@ const InstalledApps = () => {
   }, []);
 
   return (
-    <div className="p-4 border border-gray-300 rounded shadow-md">
-      <h2 className="text-lg font-bold">Installed Applications</h2>
+    <div className="p-6 bg-white shadow-md rounded-md">
+      <h2 className="text-2xl font-semibold mb-4">Installed Applications</h2>
+
       {loading ? (
-        <p>Loading...</p>
+        <p className="text-center text-gray-600">Loading...</p>
+      ) : error ? (
+        <p className="text-center text-red-600">{error}</p>
+      ) : apps.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-300">
+            <thead className="bg-gray-200">
+              <tr>
+                <th className="border p-2">Identifying Number</th>
+                <th className="border p-2">Install Date</th>
+                <th className="border p-2">Install Location</th>
+                <th className="border p-2">Name</th>
+                <th className="border p-2">Vendor</th>
+                <th className="border p-2">Version</th>
+              </tr>
+            </thead>
+            <tbody>
+              {apps.map((app, index) => (
+                <tr key={index} className="hover:bg-gray-100">
+                  <td className="border p-2">{app.identifying_number || "N/A"}</td>
+                  <td className="border p-2">{app.install_date || "N/A"}</td>
+                  <td className="border p-2">{app.install_location || "N/A"}</td>
+                  <td className="border p-2 font-semibold">{app.name || "Unknown"}</td>
+                  <td className="border p-2">{app.vendor || "Unknown"}</td>
+                  <td className="border p-2">{app.version || "Unknown"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <ul className="text-sm">
-          {apps.length > 0 ? (
-            apps.map((app, index) => <li key={index}>{app}</li>)
-          ) : (
-            <li>No installed applications found.</li>
-          )}
-        </ul>
+        <p className="text-center text-gray-500">No installed applications found.</p>
       )}
+
       <button
-        className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
         onClick={fetchInstalledApps}
         disabled={loading}
       >

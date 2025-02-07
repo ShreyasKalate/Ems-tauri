@@ -1,10 +1,10 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use sysinfo::System;
 use winreg::enums::*;
 use winreg::RegKey;
-use std::collections::HashSet;
+use sysinfo::System;
+use serde::{Serialize, Deserialize};
+use std::process::{Command, Stdio};
 use tauri::command;
 
 #[command]
@@ -18,10 +18,21 @@ fn get_running_apps() -> Vec<String> {
         .collect()
 }
 
-#[command]
-fn get_installed_apps() -> Vec<String> {
-    let mut apps: HashSet<String> = HashSet::new();
+#[derive(Serialize, Deserialize, Debug)]
+struct InstalledApp {
+    identifying_number: String,
+    install_date: String,
+    install_location: String,
+    name: String,
+    vendor: String,
+    version: String,
+}
 
+#[command]
+fn get_installed_apps() -> Vec<InstalledApp> {
+    let mut apps: Vec<InstalledApp> = Vec::new();
+
+    // Access Windows Registry
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
         .ok();
@@ -30,28 +41,42 @@ fn get_installed_apps() -> Vec<String> {
         .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
         .ok();
 
-    if let Some(key) = hklm {
+    let mut extract_info = |key: &RegKey| {
         for subkey_name in key.enum_keys().filter_map(Result::ok) {
             if let Ok(subkey) = key.open_subkey(&subkey_name) {
-                if let Ok(display_name) = subkey.get_value::<String, _>("DisplayName") {
-                    apps.insert(display_name);
+                let identifying_number = subkey.get_value::<String, _>("IdentifyingNumber").unwrap_or("N/A".to_string());
+                let install_date = subkey.get_value::<String, _>("InstallDate").unwrap_or("N/A".to_string());
+                let install_location = subkey.get_value::<String, _>("InstallLocation").unwrap_or("N/A".to_string());
+                let name = subkey.get_value::<String, _>("DisplayName").unwrap_or_default();
+                let vendor = subkey.get_value::<String, _>("Publisher").unwrap_or("Unknown".to_string());
+                let version = subkey.get_value::<String, _>("DisplayVersion").unwrap_or("Unknown".to_string());
+
+                // Only add applications that have a name
+                if !name.is_empty() {
+                    apps.push(InstalledApp {
+                        identifying_number,
+                        install_date,
+                        install_location,
+                        name,
+                        vendor,
+                        version,
+                    });
                 }
             }
         }
+    };
+
+    if let Some(key) = hklm {
+        extract_info(&key);
     }
 
     if let Some(key) = hkcu {
-        for subkey_name in key.enum_keys().filter_map(Result::ok) {
-            if let Ok(subkey) = key.open_subkey(&subkey_name) {
-                if let Ok(display_name) = subkey.get_value::<String, _>("DisplayName") {
-                    apps.insert(display_name);
-                }
-            }
-        }
+        extract_info(&key);
     }
 
-    apps.into_iter().collect()
+    apps
 }
+
 
 #[command]
 fn get_ram_usage() -> String {
