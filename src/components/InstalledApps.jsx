@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 const InstalledApps = () => {
-  const [apps, setApps] = useState([]);
+  const [systemApps, setSystemApps] = useState([]);
+  const [userApps, setUserApps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -10,12 +11,14 @@ const InstalledApps = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke("get_installed_apps");
-      setApps(result);
+      const [system, user] = await invoke("get_installed_apps");
+      setSystemApps(system);
+      setUserApps(user);
     } catch (error) {
       console.error("Failed to fetch installed applications:", error);
       setError("Failed to fetch installed applications.");
-      setApps([]);
+      setSystemApps([]);
+      setUserApps([]);
     } finally {
       setLoading(false);
     }
@@ -25,15 +28,10 @@ const InstalledApps = () => {
     fetchInstalledApps();
   }, []);
 
-  return (
-    <div className="p-6 bg-white shadow-md rounded-md">
-      <h2 className="text-2xl font-semibold mb-4">Installed Applications</h2>
-
-      {loading ? (
-        <p className="text-center text-gray-600">Loading...</p>
-      ) : error ? (
-        <p className="text-center text-red-600">{error}</p>
-      ) : apps.length > 0 ? (
+  const renderTable = (apps, title) => (
+    <div className="mb-6">
+      <h3 className="text-xl font-semibold mb-2">{title}</h3>
+      {apps.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse border border-gray-300">
             <thead className="bg-gray-200">
@@ -62,6 +60,23 @@ const InstalledApps = () => {
         </div>
       ) : (
         <p className="text-center text-gray-500">No installed applications found.</p>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="p-6 bg-white shadow-md rounded-md">
+      <h2 className="text-2xl font-semibold mb-4">Installed Applications</h2>
+
+      {loading ? (
+        <p className="text-center text-gray-600">Loading...</p>
+      ) : error ? (
+        <p className="text-center text-red-600">{error}</p>
+      ) : (
+        <>
+          {renderTable(systemApps, "System-Wide Installed Applications")}
+          {renderTable(userApps, "User-Specific Installed Applications")}
+        </>
       )}
 
       <button

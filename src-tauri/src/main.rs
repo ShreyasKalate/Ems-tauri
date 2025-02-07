@@ -90,26 +90,20 @@ fn get_msi_installed_apps() -> Vec<(String, String)> {
 }
 
 #[command]
-fn get_installed_apps() -> Vec<InstalledApp> {
-    let mut apps: Vec<InstalledApp> = Vec::new();
+fn get_installed_apps() -> (Vec<InstalledApp>, Vec<InstalledApp>) {
+    let mut system_apps: Vec<InstalledApp> = Vec::new();
+    let mut user_apps: Vec<InstalledApp> = Vec::new();
     let msi_apps = get_msi_installed_apps();
 
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE)
-        .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
-        .ok();
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
-        .ok();
-
-    let mut extract_info = |key: &RegKey| {
+    // Extract information from registry keys
+    let extract_info = |key: &RegKey, app_list: &mut Vec<InstalledApp>| {
         for subkey_name in key.enum_keys().filter_map(Result::ok) {
             if let Ok(subkey) = key.open_subkey(&subkey_name) {
                 let name = subkey.get_value::<String, _>("DisplayName").unwrap_or_default();
                 if name.is_empty() {
                     continue;
                 }
-                
+
                 let identifying_number = msi_apps
                     .iter()
                     .find(|(app_name, _)| app_name == &name)
@@ -124,7 +118,7 @@ fn get_installed_apps() -> Vec<InstalledApp> {
                 let vendor = subkey.get_value::<String, _>("Publisher").unwrap_or("Unknown".to_string());
                 let version = subkey.get_value::<String, _>("DisplayVersion").unwrap_or("Unknown".to_string());
 
-                apps.push(InstalledApp {
+                app_list.push(InstalledApp {
                     identifying_number,
                     install_date,
                     install_location,
@@ -136,15 +130,17 @@ fn get_installed_apps() -> Vec<InstalledApp> {
         }
     };
 
-    if let Some(key) = hklm {
-        extract_info(&key);
+    // Retrieve system-wide installed apps from HKLM (HKEY_LOCAL_MACHINE)
+    if let Ok(hklm) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall") {
+        extract_info(&hklm, &mut system_apps);
     }
 
-    if let Some(key) = hkcu {
-        extract_info(&key);
+    // Retrieve user-specific installed apps from HKCU (HKEY_CURRENT_USER)
+    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall") {
+        extract_info(&hkcu, &mut user_apps);
     }
 
-    apps
+    (system_apps, user_apps)
 }
 
 #[command]
