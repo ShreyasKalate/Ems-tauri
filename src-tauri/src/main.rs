@@ -4,7 +4,7 @@ use winreg::enums::*;
 use winreg::RegKey;
 use sysinfo::System;
 use serde::{Serialize, Deserialize};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use tauri::command;
 
 #[command]
@@ -26,6 +26,20 @@ struct InstalledApp {
     name: String,
     vendor: String,
     version: String,
+}
+
+// Function to convert date format from YYYYMMDD to DD-MM-YYYY
+fn format_date(date: &str) -> String {
+    if date.len() == 8 {
+        format!(
+            "{}-{}-{}",
+            &date[6..],  // Day
+            &date[4..6], // Month
+            &date[0..4]  // Year
+        )
+    } else {
+        "N/A".to_string()
+    }
 }
 
 // Function to get identifying numbers using `wmic`
@@ -83,7 +97,10 @@ fn get_installed_apps() -> Vec<InstalledApp> {
                     .map(|(_, id)| id.clone())
                     .unwrap_or("N/A".to_string());
 
-                let install_date = subkey.get_value::<String, _>("InstallDate").unwrap_or("N/A".to_string());
+                let install_date = subkey.get_value::<String, _>("InstallDate")
+                    .map(|d| format_date(&d))
+                    .unwrap_or("N/A".to_string());
+
                 let install_location = subkey.get_value::<String, _>("InstallLocation").unwrap_or("N/A".to_string());
                 let vendor = subkey.get_value::<String, _>("Publisher").unwrap_or("Unknown".to_string());
                 let version = subkey.get_value::<String, _>("DisplayVersion").unwrap_or("Unknown".to_string());
