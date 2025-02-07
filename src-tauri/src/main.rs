@@ -6,15 +6,37 @@ use sysinfo::System;
 use serde::{Serialize, Deserialize};
 use std::process::Command;
 use tauri::command;
+use chrono::{Utc, NaiveDateTime};
+
+#[derive(Serialize, Deserialize)]
+struct RunningApp {
+    name: String,
+    pid: u32,
+    cpu_usage: f32,
+    memory_usage: u64,
+    start_time: String,
+}
 
 #[command]
-fn get_running_apps() -> Vec<String> {
+fn get_running_apps() -> Vec<RunningApp> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
     sys.processes()
         .iter()
-        .map(|(pid, process)| format!("{} (PID: {})", process.name().to_string_lossy(), pid))
+        .map(|(pid, process)| {
+            let start_time = chrono::DateTime::from_timestamp(process.start_time() as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or("Unknown".to_string());
+
+            RunningApp {
+                name: process.name().to_string_lossy().to_string(),
+                pid: pid.as_u32(),
+                cpu_usage: process.cpu_usage(),
+                memory_usage: process.memory(),
+                start_time,
+            }
+        })
         .collect()
 }
 
@@ -28,7 +50,6 @@ struct InstalledApp {
     version: String,
 }
 
-// Function to convert date format from YYYYMMDD to DD-MM-YYYY
 fn format_date(date: &str) -> String {
     if date.len() == 8 {
         format!(
@@ -42,7 +63,6 @@ fn format_date(date: &str) -> String {
     }
 }
 
-// Function to get identifying numbers using `wmic`
 fn get_msi_installed_apps() -> Vec<(String, String)> {
     let output = Command::new("wmic")
         .args(["product", "get", "IdentifyingNumber,Name"])
@@ -74,7 +94,6 @@ fn get_installed_apps() -> Vec<InstalledApp> {
     let mut apps: Vec<InstalledApp> = Vec::new();
     let msi_apps = get_msi_installed_apps();
 
-    // Access Windows Registry
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
         .ok();
