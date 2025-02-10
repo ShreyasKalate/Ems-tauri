@@ -5,6 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use serde_json::Value;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct BrowserHistory {
@@ -17,11 +18,41 @@ pub struct BrowserHistory {
     visit_time: String,
 }
 
+fn get_profile_display_names(browser_name: &str) -> HashMap<String, String> {
+    let user_profile = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    let local_state_path = match browser_name {
+        "Chrome" => PathBuf::from(format!("{}\\AppData\\Local\\Google\\Chrome\\User Data\\Local State", user_profile)),
+        "Brave" => PathBuf::from(format!("{}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Local State", user_profile)),
+        "Edge" => PathBuf::from(format!("{}\\AppData\\Local\\Microsoft\\Edge\\User Data\\Local State", user_profile)),
+        _ => return HashMap::new(),
+    };
+
+    let mut profile_map = HashMap::new();
+    if let Ok(data) = fs::read_to_string(local_state_path) {
+        if let Ok(json) = serde_json::from_str::<Value>(&data) {
+            if let Some(profiles) = json.get("profile") {
+                if let Some(info_cache) = profiles.get("info_cache") {
+                    if let Some(profiles_map) = info_cache.as_object() {
+                        for (profile_key, profile_info) in profiles_map {
+                            if let Some(display_name) = profile_info.get("name").and_then(Value::as_str) {
+                                profile_map.insert(profile_key.clone(), display_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    profile_map
+}
+
 fn get_browser_profiles(base_path: &str, browser_name: &str) -> Vec<(PathBuf, String, String)> {
     let user_profile = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
     let browser_base_path = PathBuf::from(format!("{}{}", user_profile, base_path));
 
+    let profile_display_names = get_profile_display_names(browser_name);
     let mut profiles = Vec::new();
+
     if let Ok(entries) = fs::read_dir(browser_base_path) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -29,7 +60,8 @@ fn get_browser_profiles(base_path: &str, browser_name: &str) -> Vec<(PathBuf, St
                 let history_db = path.join("History");
                 if history_db.exists() {
                     let profile_name = entry.file_name().to_string_lossy().to_string();
-                    profiles.push((path, profile_name, browser_name.to_string()));
+                    let display_name = profile_display_names.get(&profile_name).cloned().unwrap_or(profile_name.clone());
+                    profiles.push((path, display_name, browser_name.to_string()));
                 }
             }
         }
@@ -67,7 +99,7 @@ fn extract_history(profiles: Vec<(PathBuf, String, String)>) -> Vec<BrowserHisto
         let history_path = if browser_name == "Firefox" {
             profile.join("places.sqlite")
         } else {
-            profile.join("History") //for chromium based browsers
+            profile.join("History")
         };
 
         let temp_path = env::temp_dir().join(format!("{}_history_{}.db", browser_name.to_lowercase(), profile_display_name));
