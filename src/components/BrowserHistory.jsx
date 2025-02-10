@@ -3,6 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 
 const BrowserHistory = () => {
   const [history, setHistory] = useState([]);
+  const [filteredHistory, setFilteredHistory] = useState([]);
+  const [profiles, setProfiles] = useState([]);
+  const [selectedProfile, setSelectedProfile] = useState("");
+  const [selectedGmail, setSelectedGmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -12,6 +16,19 @@ const BrowserHistory = () => {
     try {
       const result = await invoke("get_browser_history");
       setHistory(result);
+
+      // Extract unique profiles
+      const uniqueProfiles = [
+        ...new Map(result.map(entry => [entry.profile_display_name, entry])).values(),
+      ];
+
+      setProfiles(uniqueProfiles);
+      
+      if (uniqueProfiles.length > 0) {
+        setSelectedProfile(uniqueProfiles[0].profile_display_name);
+        setSelectedGmail(uniqueProfiles[0].gmail);
+        setFilteredHistory(result.filter(entry => entry.profile_display_name === uniqueProfiles[0].profile_display_name));
+      }
     } catch (error) {
       console.error("Failed to fetch browser history:", error);
       setError("Failed to fetch browser history.");
@@ -24,54 +41,65 @@ const BrowserHistory = () => {
     fetchBrowserHistory();
   }, []);
 
-  // Grouping history by profile names
-  const groupedHistory = history.reduce((grouped, entry) => {
-    if (!grouped[entry.profile_display_name]) {
-      grouped[entry.profile_display_name] = [];
-    }
-    grouped[entry.profile_display_name].push(entry);
-    return grouped;
-  }, {});
+  useEffect(() => {
+    const selectedProfileData = profiles.find(p => p.profile_display_name === selectedProfile);
+    setSelectedGmail(selectedProfileData ? selectedProfileData.gmail : "Unknown");
+
+    setFilteredHistory(history.filter(entry => entry.profile_display_name === selectedProfile));
+  }, [selectedProfile, history]);
 
   return (
     <div className="p-6 bg-white shadow-md rounded-md">
-      <h2 className="text-3xl font-semibold mb-6 text-gray-800">Recent Browser History</h2>
+      <h2 className="text-3xl font-semibold mb-6 text-gray-800">Browser History</h2>
 
       {loading ? (
         <p className="text-center text-gray-600 text-lg">Loading...</p>
       ) : error ? (
         <p className="text-center text-red-600 text-lg">{error}</p>
       ) : (
-        <div className="space-y-8">
-          {Object.entries(groupedHistory).length === 0 ? (
-            <p className="text-center text-gray-500 text-lg">No history found.</p>
-          ) : (
-            Object.entries(groupedHistory).map(([profile, entries], index) => (
-              <div key={index} className="p-4 border border-gray-300 rounded-lg">
-                <h3 className="text-xl font-semibold text-blue-600 mb-2">{profile}</h3>
-                <ul className="list-disc pl-5">
-                  {entries.map((entry, i) => (
-                    <li key={i} className="mt-1">
-                      <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                        {entry.title || "No Title"}
-                      </a>{" "}
-                      - <span className="text-gray-500 text-sm">{entry.visit_time}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
-          )}
-        </div>
-      )}
+        <>
+          {/* Dropdown to Select Profile */}
+          <div className="mb-4">
+            <label className="block text-lg font-semibold mb-2">Select Profile:</label>
+            <select
+              className="p-2 border border-gray-300 rounded-md w-full md:w-1/3"
+              value={selectedProfile}
+              onChange={(e) => setSelectedProfile(e.target.value)}
+            >
+              {profiles.map((profile, index) => (
+                <option key={index} value={profile.profile_display_name}>{profile.profile_display_name}</option>
+              ))}
+            </select>
+            <p className="mt-2 text-gray-600"><strong>Gmail ID:</strong> {selectedGmail}</p>
+          </div>
 
-      <button
-        className="mt-6 px-5 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-        onClick={fetchBrowserHistory}
-        disabled={loading}
-      >
-        {loading ? "Refreshing..." : "Refresh History"}
-      </button>
+          {/* History Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse border border-gray-300">
+              <thead className="bg-gray-200">
+                <tr>
+                  <th className="border p-2 w-1/4">Title</th>
+                  <th className="border p-2 w-1/2">URL</th>
+                  <th className="border p-2 w-1/4">Visit Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredHistory.map((entry, index) => (
+                  <tr key={index} className="hover:bg-gray-100">
+                    <td className="border p-2">{entry.title || "No Title"}</td>
+                    <td className="border p-2 truncate">
+                      <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline" title={entry.url}>
+                        {entry.url.length > 50 ? entry.url.substring(0, 50) + "..." : entry.url}
+                      </a>
+                    </td>
+                    <td className="border p-2">{entry.visit_time}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 };
