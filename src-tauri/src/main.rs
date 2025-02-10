@@ -4,59 +4,143 @@ use winreg::enums::*;
 use winreg::RegKey;
 use sysinfo::System;
 use serde::{Serialize, Deserialize};
+use serde_json::Value;
 use std::process::Command;
 use tauri::command;
 use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 use std::fs;
+use std::env;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct BrowserHistory {
+    profile: String,
+    profile_display_name: String,
     title: String,
     url: String,
     visit_time: String,
 }
 
+fn get_profile_display_names() -> std::collections::HashMap<String, String> {
+    let user_profile = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    let local_state_path = PathBuf::from(format!(
+        "{}\\AppData\\Local\\Google\\Chrome\\User Data\\Local State",
+        user_profile
+    ));
+
+    let mut profile_map = std::collections::HashMap::new();
+
+    if let Ok(data) = fs::read_to_string(local_state_path) {
+        if let Ok(json) = serde_json::from_str::<Value>(&data) {
+            if let Some(profiles) = json.get("profile") {
+                if let Some(info_cache) = profiles.get("info_cache") {
+                    if let Some(profiles_map) = info_cache.as_object() {
+                        for (profile_key, profile_info) in profiles_map {
+                            if let Some(display_name) = profile_info.get("name").and_then(Value::as_str) {
+                                profile_map.insert(profile_key.clone(), display_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    profile_map
+}
+
+fn get_chrome_profiles() -> Vec<PathBuf> {
+    let user_profile = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    let chrome_base_path = PathBuf::from(format!(
+        "{}\\AppData\\Local\\Google\\Chrome\\User Data",
+        user_profile
+    ));
+
+    let mut profiles = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(chrome_base_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let history_db = path.join("History");
+                if history_db.exists() {
+                    profiles.push(path);
+                }
+            }
+        }
+    }
+
+    profiles
+}
+
 #[command]
 fn get_browser_history() -> Result<Vec<BrowserHistory>, String> {
-    let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-    let history_path = PathBuf::from(format!(
-        "{}\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\History",
-        user_profile
-    ));
+    let mut all_history = Vec::new();
+    let profiles = get_chrome_profiles();
+    let profile_names = get_profile_display_names();
 
-    if !history_path.exists() {
-        return Err("Chrome history database not found".to_string());
+    for profile in profiles {
+        let profile_name = profile.file_name().unwrap().to_string_lossy().to_string();
+        let profile_display_name = profile_names.get(&profile_name).cloned().unwrap_or(profile_name.clone());
+
+        let history_path = profile.join("History");
+        let temp_path = env::temp_dir().join(format!("chrome_history_{}.db", profile_name));
+
+        // Copy history file (to prevent locks)
+        if let Err(err) = fs::copy(&history_path, &temp_path) {
+            eprintln!("Failed to copy history DB for profile {}: {}", profile_display_name, err);
+            continue;
+        }
+
+        // Open SQLite database
+        let conn = match Connection::open(&temp_path) {
+            Ok(conn) => conn,
+            Err(err) => {
+                eprintln!("Failed to open history DB for profile {}: {}", profile_display_name, err);
+                continue;
+            }
+        };
+
+        let query = "
+            SELECT title, url, datetime(last_visit_time/1000000-11644473600, 'unixepoch') 
+            FROM urls 
+            ORDER BY last_visit_time DESC 
+            LIMIT 10
+        ";
+
+        let mut stmt = match conn.prepare(query) {
+            Ok(stmt) => stmt,
+            Err(err) => {
+                eprintln!("Failed to prepare query for profile {}: {}", profile_display_name, err);
+                continue;
+            }
+        };
+
+        let history_iter = match stmt.query_map([], |row| {
+            Ok(BrowserHistory {
+                profile: profile_name.clone(),
+                profile_display_name: profile_display_name.clone(),
+                title: row.get(0)?,
+                url: row.get(1)?,
+                visit_time: row.get(2)?,
+            })
+        }) {
+            Ok(iter) => iter,
+            Err(err) => {
+                eprintln!("Failed to execute query for profile {}: {}", profile_display_name, err);
+                continue;
+            }
+        };
+
+        for entry in history_iter {
+            match entry {
+                Ok(history) => all_history.push(history),
+                Err(err) => eprintln!("Error reading history entry for profile {}: {}", profile_display_name, err),
+            }
+        }
     }
 
-    let temp_path = PathBuf::from(format!(
-        "{}\\AppData\\Local\\Temp\\chrome_history_copy",
-        user_profile
-    ));
-    
-    // Copy the database to avoid Chrome locking it
-    fs::copy(&history_path, &temp_path).map_err(|e| e.to_string())?;
-
-    let conn = Connection::open(&temp_path).map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT title, url, datetime(last_visit_time/1000000-11644473600, 'unixepoch') 
-        FROM urls ORDER BY last_visit_time DESC LIMIT 10",
-    ).map_err(|e| e.to_string())?;
-
-    let history_iter = stmt.query_map([], |row| {
-        Ok(BrowserHistory {
-            title: row.get(0)?,
-            url: row.get(1)?,
-            visit_time: row.get(2)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut history = Vec::new();
-    for entry in history_iter {
-        history.push(entry.map_err(|e| e.to_string())?);
-    }
-
-    Ok(history)
+    Ok(all_history)
 }
 
 #[derive(Serialize, Deserialize)]
