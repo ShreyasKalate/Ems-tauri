@@ -5,7 +5,9 @@ const BrowserHistory = () => {
   const [history, setHistory] = useState([]);
   const [filteredHistory, setFilteredHistory] = useState([]);
   const [profiles, setProfiles] = useState([]);
+  const [browsers, setBrowsers] = useState([]);
   const [selectedProfile, setSelectedProfile] = useState("");
+  const [selectedBrowser, setSelectedBrowser] = useState("");
   const [selectedGmail, setSelectedGmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -17,18 +19,15 @@ const BrowserHistory = () => {
       const result = await invoke("get_browser_history");
       setHistory(result);
 
-      // Extract unique profiles
-      const uniqueProfiles = [
-        ...new Map(result.map(entry => [entry.profile_display_name, entry])).values(),
-      ];
+      // Extract unique browsers
+      const uniqueBrowsers = [...new Set(result.map(entry => entry.browser))];
+      setBrowsers(uniqueBrowsers);
 
-      setProfiles(uniqueProfiles);
-      
-      if (uniqueProfiles.length > 0) {
-        setSelectedProfile(uniqueProfiles[0].profile_display_name);
-        setSelectedGmail(uniqueProfiles[0].gmail);
-        setFilteredHistory(result.filter(entry => entry.profile_display_name === uniqueProfiles[0].profile_display_name));
+      if (uniqueBrowsers.length > 0) {
+        setSelectedBrowser(uniqueBrowsers[0]);
       }
+
+      updateProfiles(result, uniqueBrowsers[0]);
     } catch (error) {
       console.error("Failed to fetch browser history:", error);
       setError("Failed to fetch browser history.");
@@ -37,16 +36,48 @@ const BrowserHistory = () => {
     }
   };
 
+  const updateProfiles = (historyData, browser) => {
+    const uniqueProfiles = [
+      ...new Map(
+        historyData
+          .filter(entry => entry.browser === browser)
+          .map(entry => [entry.profile_display_name, entry])
+      ).values(),
+    ];
+    setProfiles(uniqueProfiles);
+
+    if (uniqueProfiles.length > 0) {
+      setSelectedProfile(uniqueProfiles[0].profile_display_name);
+      setSelectedGmail(uniqueProfiles[0].gmail);
+    } else {
+      setSelectedProfile("");
+      setSelectedGmail("Unknown");
+    }
+
+    updateFilteredHistory(historyData, browser, uniqueProfiles[0]?.profile_display_name || "");
+  };
+
+  const updateFilteredHistory = (historyData, browser, profile) => {
+    setFilteredHistory(
+      historyData.filter(entry => entry.browser === browser && entry.profile_display_name === profile)
+    );
+  };
+
   useEffect(() => {
     fetchBrowserHistory();
   }, []);
 
   useEffect(() => {
-    const selectedProfileData = profiles.find(p => p.profile_display_name === selectedProfile);
-    setSelectedGmail(selectedProfileData ? selectedProfileData.gmail : "Unknown");
+    updateProfiles(history, selectedBrowser);
+  }, [selectedBrowser, history]);
 
-    setFilteredHistory(history.filter(entry => entry.profile_display_name === selectedProfile));
-  }, [selectedProfile, history]);
+  useEffect(() => {
+    updateFilteredHistory(history, selectedBrowser, selectedProfile);
+    const selectedProfileData = history.find(
+      entry => entry.profile_display_name === selectedProfile && entry.browser === selectedBrowser
+    );
+    setSelectedGmail(selectedProfileData ? selectedProfileData.gmail : "Unknown");
+  }, [selectedProfile, selectedBrowser, history]);
 
   return (
     <div className="p-6 bg-white shadow-md rounded-md">
@@ -58,6 +89,20 @@ const BrowserHistory = () => {
         <p className="text-center text-red-600 text-lg">{error}</p>
       ) : (
         <>
+          {/* Dropdown to Select Browser */}
+          <div className="mb-4">
+            <label className="block text-lg font-semibold mb-2">Select Browser:</label>
+            <select
+              className="p-2 border border-gray-300 rounded-md w-full md:w-1/3"
+              value={selectedBrowser}
+              onChange={(e) => setSelectedBrowser(e.target.value)}
+            >
+              {browsers.map((browser, index) => (
+                <option key={index} value={browser}>{browser}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Dropdown to Select Profile */}
           <div className="mb-4">
             <label className="block text-lg font-semibold mb-2">Select Profile:</label>
@@ -67,7 +112,9 @@ const BrowserHistory = () => {
               onChange={(e) => setSelectedProfile(e.target.value)}
             >
               {profiles.map((profile, index) => (
-                <option key={index} value={profile.profile_display_name}>{profile.profile_display_name}</option>
+                <option key={index} value={profile.profile_display_name}>
+                  {profile.profile_display_name} ({profile.browser})
+                </option>
               ))}
             </select>
             <p className="mt-2 text-gray-600"><strong>Gmail ID:</strong> {selectedGmail}</p>
