@@ -37,6 +37,14 @@ const Sidebar = () => {
             Installed Apps
           </Link>
         </li>
+        <li>
+          <Link
+            to="/browser-history"
+            className="block p-2 hover:bg-gray-700 rounded transition"
+          >
+            Browser History
+          </Link>
+        </li>
       </ul>
     </nav>
   );

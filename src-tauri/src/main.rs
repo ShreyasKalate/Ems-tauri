@@ -6,7 +6,58 @@ use sysinfo::System;
 use serde::{Serialize, Deserialize};
 use std::process::Command;
 use tauri::command;
-use chrono::{Utc, NaiveDateTime};
+use rusqlite::{Connection, Result};
+use std::path::PathBuf;
+use std::fs;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct BrowserHistory {
+    title: String,
+    url: String,
+    visit_time: String,
+}
+
+#[command]
+fn get_browser_history() -> Result<Vec<BrowserHistory>, String> {
+    let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    let history_path = PathBuf::from(format!(
+        "{}\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\History",
+        user_profile
+    ));
+
+    if !history_path.exists() {
+        return Err("Chrome history database not found".to_string());
+    }
+
+    let temp_path = PathBuf::from(format!(
+        "{}\\AppData\\Local\\Temp\\chrome_history_copy",
+        user_profile
+    ));
+    
+    // Copy the database to avoid Chrome locking it
+    fs::copy(&history_path, &temp_path).map_err(|e| e.to_string())?;
+
+    let conn = Connection::open(&temp_path).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT title, url, datetime(last_visit_time/1000000-11644473600, 'unixepoch') 
+        FROM urls ORDER BY last_visit_time DESC LIMIT 10",
+    ).map_err(|e| e.to_string())?;
+
+    let history_iter = stmt.query_map([], |row| {
+        Ok(BrowserHistory {
+            title: row.get(0)?,
+            url: row.get(1)?,
+            visit_time: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut history = Vec::new();
+    for entry in history_iter {
+        history.push(entry.map_err(|e| e.to_string())?);
+    }
+
+    Ok(history)
+}
 
 #[derive(Serialize, Deserialize)]
 struct RunningApp {
@@ -160,7 +211,7 @@ fn get_ram_usage() -> String {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_ram_usage, get_running_apps, get_installed_apps])
+        .invoke_handler(tauri::generate_handler![get_ram_usage, get_running_apps, get_installed_apps, get_browser_history])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
 }
