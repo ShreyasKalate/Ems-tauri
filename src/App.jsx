@@ -4,6 +4,7 @@ import RunningApps from "./components/RunningApps";
 import InstalledApps from "./components/InstalledApps";
 import SystemMonitor from "./pages/SystemMonitor";
 import BrowserHistory from "./components/BrowserHistory";
+import VisibleApps from "./components/VisibleApps";
 import "./App.css";
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
             <Route path="/system-monitor" element={<SystemMonitor />} />
             <Route path="/running-apps" element={<RunningApps />} />
             <Route path="/installed-apps" element={<InstalledApps />} />
+            <Route path="/visible-apps" element={<VisibleApps />} />
             <Route path="/browser-history" element={<BrowserHistory />} />
           </Routes>
         </main>

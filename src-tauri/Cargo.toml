@@ -26,3 +26,4 @@ sysinfo = "0.33"  # Add this line
 winreg = "0.55"
 chrono = "0.4.39"
 rusqlite = { version = "0.30", features = ["bundled"] }
+windows = { version = "0.59.0", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

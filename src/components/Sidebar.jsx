@@ -31,6 +31,14 @@ const Sidebar = () => {
         </li>
         <li>
           <Link
+            to="/visible-apps"
+            className="block p-2 hover:bg-gray-700 rounded transition"
+          >
+            Visible Apps
+          </Link>
+        </li>
+        <li>
+          <Link
             to="/installed-apps"
             className="block p-2 hover:bg-gray-700 rounded transition"
           >
