@@ -22,12 +22,39 @@ const VisibleApps = () => {
   };
 
   useEffect(() => {
-    fetchVisibleApps();
+    fetchVisibleApps(); // Initial fetch
+
+    // Update running time locally every second
+    const interval = setInterval(() => {
+      setApps((prevApps) =>
+        prevApps.map((app) => {
+          const timeParts = app.running_time.split(":").map(Number);
+          let [hours, minutes, seconds] = timeParts;
+
+          seconds += 1;
+          if (seconds === 60) {
+            seconds = 0;
+            minutes += 1;
+          }
+          if (minutes === 60) {
+            minutes = 0;
+            hours += 1;
+          }
+
+          return {
+            ...app,
+            running_time: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`,
+          };
+        })
+      );
+    }, 1000);
+
+    return () => clearInterval(interval); // Cleanup on unmount
   }, []);
 
   return (
     <div className="p-6 bg-white shadow-md rounded-md">
-      <h2 className="text-2xl font-semibold mb-4">User-Visible Applications</h2>
+      <h2 className="text-2xl font-semibold mb-4">Visible Applications</h2>
 
       {loading ? (
         <p className="text-center text-gray-600">Loading...</p>
@@ -39,7 +66,8 @@ const VisibleApps = () => {
             <thead className="bg-gray-200">
               <tr>
                 <th className="border p-2">PID</th>
-                <th className="border p-2">Application Name</th>
+                <th className="border p-2">Process Name</th>
+                <th className="border p-2">Running Time</th>
               </tr>
             </thead>
             <tbody>
@@ -47,6 +75,7 @@ const VisibleApps = () => {
                 <tr key={index} className="hover:bg-gray-100">
                   <td className="border p-2">{app.pid}</td>
                   <td className="border p-2 font-semibold">{app.name}</td>
+                  <td className="border p-2 font-mono text-green-600">{app.running_time}</td>
                 </tr>
               ))}
             </tbody>

@@ -23,11 +23,47 @@ const RunningApps = () => {
 
   useEffect(() => {
     fetchRunningApps();
+    const interval = setInterval(() => {
+      setApps((prevApps) =>
+        prevApps.map((app) => {
+          const timeParts = app.running_time.split(":").map(Number);
+          let [hours, minutes, seconds] = timeParts;
+
+          seconds += 1;
+          if (seconds === 60) {
+            seconds = 0;
+            minutes += 1;
+          }
+          if (minutes === 60) {
+            minutes = 0;
+            hours += 1;
+          }
+
+          return {
+            ...app,
+            running_time: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`,
+          };
+        })
+      );
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, []);
+
+
+  
 
   return (
     <div className="p-6 bg-white shadow-md rounded-md">
       <h2 className="text-2xl font-semibold mb-4">Running Applications</h2>
+
+      <button
+        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 m-4"
+        onClick={fetchRunningApps}
+        disabled={loading}
+      >
+        {loading ? "Refreshing..." : "Refresh List"}
+      </button>
 
       {loading ? (
         <p className="text-center text-gray-600">Loading...</p>
@@ -43,6 +79,7 @@ const RunningApps = () => {
                 <th className="border p-2">CPU Usage (%)</th>
                 <th className="border p-2">Memory Usage (MB)</th>
                 <th className="border p-2">Start Time</th>
+                <th className="border p-2">Running Time</th>
               </tr>
             </thead>
             <tbody>
@@ -53,6 +90,7 @@ const RunningApps = () => {
                   <td className="border p-2">{app.cpu_usage.toFixed(2)}</td>
                   <td className="border p-2">{(app.memory_usage / 1024 / 1024).toFixed(2)} MB</td>
                   <td className="border p-2">{app.start_time}</td>
+                  <td className="border p-2 font-mono text-green-600">{app.running_time}</td>
                 </tr>
               ))}
             </tbody>
@@ -62,13 +100,7 @@ const RunningApps = () => {
         <p className="text-center text-gray-500">No running applications found.</p>
       )}
 
-      <button
-        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-        onClick={fetchRunningApps}
-        disabled={loading}
-      >
-        {loading ? "Refreshing..." : "Refresh List"}
-      </button>
+
     </div>
   );
 };

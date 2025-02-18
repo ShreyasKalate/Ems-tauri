@@ -1,7 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
-use commands::{ system::get_visible_apps, system::get_running_apps, system::get_ram_usage, apps::get_installed_apps, browser::get_browser_history};
+use commands::{
+    system::get_ram_usage,
+    apps::get_installed_apps,
+    browser::get_browser_history,
+    visible_apps::get_visible_apps,
+    running_apps::get_running_apps,
+};
 
 fn main() {
     tauri::Builder::default()
