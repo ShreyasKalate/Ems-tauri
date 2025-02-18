@@ -1,4 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
 import Sidebar from "./components/Sidebar";
 import RunningApps from "./components/RunningApps";
 import InstalledApps from "./components/InstalledApps";
@@ -8,6 +11,21 @@ import VisibleApps from "./components/VisibleApps";
 import "./App.css";
 
 function App() {
+  useEffect(() => {
+    const runInitialCommands = async () => {
+      try {
+        await invoke("get_visible_apps");
+        await invoke("get_running_apps");
+        await invoke("get_ram_usage");
+        await invoke("get_browser_history");
+        console.log("All monitoring commands executed at app launch");
+      } catch (error) {
+        console.error("Error executing initial commands:", error);
+      }
+    };
+    runInitialCommands();
+  }, []);
+
   return (
     <Router>
       <div className="flex">
@@ -18,7 +36,7 @@ function App() {
             <Route path="/" element={<h2>Home Page</h2>} />
             <Route path="/system-monitor" element={<SystemMonitor />} />
             <Route path="/running-apps" element={<RunningApps />} />
-            <Route path="/installed-apps" element={<InstalledApps />} />
+            <Route path="/installed-apps" element={<InstalledApps />} /> {/* Installed apps on click */}
             <Route path="/visible-apps" element={<VisibleApps />} />
             <Route path="/browser-history" element={<BrowserHistory />} />
           </Routes>
