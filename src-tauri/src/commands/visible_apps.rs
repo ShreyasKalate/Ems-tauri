@@ -1,22 +1,12 @@
-use std::process::Command;
-use serde::{Serialize, Deserialize};
-use chrono::{Utc, Duration};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible};
+use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use chrono::{Utc, Duration};
+use serde::{Serialize, Deserialize};
 
 lazy_static::lazy_static! {
-    static ref PROCESS_TIMES: Mutex<HashMap<u32, (i64, i64)>> = Mutex::new(HashMap::new());
-    static ref EMS_LAUNCH_TIME: i64 = Utc::now().timestamp();
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct VisibleAppRaw {
-    #[serde(alias = "ProcessName")]
-    name: String,
-    #[serde(alias = "Id")]
-    pid: u32,
-    #[serde(alias = "MainWindowTitle")]
-    window_title: String,
+    static ref PROCESS_TIMES: Mutex<HashMap<String, (i64, i64, bool)>> = Mutex::new(HashMap::new());
 }
 
 #[derive(Serialize, Deserialize)]
@@ -24,49 +14,77 @@ pub struct VisibleApp {
     name: String,
     pid: u32,
     window_title: String,
-    running_time: String,
+    curr_session: String,
+    total_usage: String,
+}
+
+unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let visible_apps = &mut *(lparam.0 as *mut Vec<VisibleApp>);
+    let mut title = [0u16; 512];
+    let len = GetWindowTextW(hwnd, &mut title);
+
+    if IsWindowVisible(hwnd).as_bool() && len > 0 {
+        let window_title = String::from_utf16_lossy(&title[..len as usize]);
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+
+        let now = Utc::now().timestamp();
+        let mut process_times = PROCESS_TIMES.lock().unwrap();
+
+        let (total_time, last_update, is_running) = process_times.entry(window_title.clone()).or_insert((0, now, false));
+        if !*is_running {
+            *last_update = now;
+            *is_running = true;
+        }
+        let elapsed = now - *last_update;
+        *total_time += elapsed;
+        *last_update = now;
+
+        visible_apps.push(VisibleApp {
+            name: window_title.clone(),
+            pid,
+            window_title,
+            curr_session: format_duration(elapsed),
+            total_usage: format_duration(*total_time),
+        });
+    }
+
+    true.into()
 }
 
 #[tauri::command]
 pub fn get_visible_apps() -> Vec<VisibleApp> {
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "Get-Process | Where-Object { $_.MainWindowTitle -ne \"\" } | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json -Compress"])
-        .output()
-        .expect("Failed to execute PowerShell command");
+    let mut visible_apps: Vec<VisibleApp> = Vec::new();
+    unsafe { EnumWindows(Some(enum_window_proc), LPARAM(&mut visible_apps as *mut _ as isize)); }
 
-    if !output.status.success() {
-        eprintln!("Error: {}", String::from_utf8_lossy(&output.stderr));
-        return vec![];
+    let mut process_times = PROCESS_TIMES.lock().unwrap();
+    let now = Utc::now().timestamp();
+
+    let current_names: Vec<String> = visible_apps.iter().map(|app| app.name.clone()).collect();
+    for (name, (total_time, last_update, is_running)) in process_times.iter_mut() {
+        if !current_names.contains(name) && *is_running {
+            let elapsed = now - *last_update;
+            *total_time += elapsed;
+            *is_running = false;
+        }
     }
 
-    let json_output = String::from_utf8_lossy(&output.stdout);
-    let raw_apps: Vec<VisibleAppRaw> = match serde_json::from_str(&json_output) {
-        Ok(apps) => apps,
-        Err(err) => {
-            eprintln!("Failed to parse JSON: {}", err);
-            return vec![];
+    for (name, (total_time, _, _)) in process_times.iter() {
+        if !current_names.contains(name) {
+            visible_apps.push(VisibleApp {
+                name: name.clone(),
+                pid: 0,
+                window_title: String::from("N/A"),
+                curr_session: String::from("00:00:00"),
+                total_usage: format_duration(*total_time),
+            });
         }
-    };
+    }
 
-    let now_ist = Utc::now().timestamp();
-    let mut process_times = PROCESS_TIMES.lock().unwrap();
+    visible_apps
+}
 
-    raw_apps.into_iter().map(|app| {
-        let (total_time, last_update) = process_times.entry(app.pid).or_insert((0, now_ist));
-        let elapsed_time = now_ist - *last_update;
-        *total_time += elapsed_time;
-        *last_update = now_ist;
-
-        let running_duration = Duration::seconds(*total_time);
-        let hours = running_duration.num_hours();
-        let minutes = running_duration.num_minutes() % 60;
-        let seconds = running_duration.num_seconds() % 60;
-
-        VisibleApp {
-            name: app.name,
-            pid: app.pid,
-            window_title: app.window_title,
-            running_time: format!("{:02}:{:02}:{:02}", hours, minutes, seconds),
-        }
-    }).collect()
+fn format_duration(seconds: i64) -> String {
+    let duration = Duration::seconds(seconds);
+    format!("{:02}:{:02}:{:02}", duration.num_hours(), duration.num_minutes() % 60, duration.num_seconds() % 60)
 }
