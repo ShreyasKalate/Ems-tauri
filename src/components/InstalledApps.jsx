@@ -11,9 +11,11 @@ const InstalledApps = () => {
     setLoading(true);
     setError(null);
     try {
-      const [system, user] = await invoke("get_installed_apps");
-      setSystemApps(system);
-      setUserApps(user);
+      const response = await invoke("get_installed_apps");
+      const parsedData = JSON.parse(response);
+      console.log("Installed applications:", parsedData);
+      setSystemApps(parsedData[0] || []);
+      setUserApps(parsedData[1] || []);
     } catch (error) {
       console.error("Failed to fetch installed applications:", error);
       setError("Failed to fetch installed applications.");

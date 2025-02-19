@@ -15,13 +15,13 @@ pub struct RunningApp {
     name: String,
     pid: u32,
     cpu_usage: f32,
-    memory_usage: u64,
+    memory_usage_mb: f64,  // Converted to MB for easier use in JSON
     start_time: String,
     running_time: String,
 }
 
 #[tauri::command]
-pub fn get_running_apps() -> Vec<RunningApp> {
+pub fn get_running_apps() -> String {
     let mut sys = System::new_all();
     sys.refresh_all();
 
@@ -31,7 +31,7 @@ pub fn get_running_apps() -> Vec<RunningApp> {
 
     let mut process_times = PROCESS_TIMES.lock().unwrap();
 
-    sys.processes()
+    let running_apps: Vec<RunningApp> = sys.processes()
         .iter()
         .map(|(pid, process)| {
             let process_name = process.name().to_string_lossy().to_string();
@@ -54,13 +54,9 @@ pub fn get_running_apps() -> Vec<RunningApp> {
                 .entry(process_name.clone())
                 .or_insert((0, now_ist));
 
-            // Correctly track running time **even if the system sleeps**
             let elapsed_time = now_ist - *last_update;
 
-            // Update running time
             *previous_total_time += elapsed_time;
-
-            // Store updated values
             *last_update = now_ist;
 
             let running_duration = Duration::seconds(*previous_total_time);
@@ -73,10 +69,12 @@ pub fn get_running_apps() -> Vec<RunningApp> {
                 name: process_name,
                 pid: pid.as_u32(),
                 cpu_usage: process.cpu_usage(),
-                memory_usage: process.memory(),
+                memory_usage_mb: process.memory() as f64 / 1024.0 / 1024.0,  // Convert bytes to MB
                 start_time: ist_start_time,
                 running_time,
             }
         })
-        .collect()
+        .collect();
+
+    serde_json::to_string(&running_apps).unwrap_or_else(|_| "[]".to_string())
 }

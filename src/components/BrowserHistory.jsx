@@ -16,18 +16,20 @@ const BrowserHistory = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke("get_browser_history");
-      setHistory(result);
+      const response = await invoke("get_browser_history");
+      const parsedData = JSON.parse(response);
+      console.log("Browser History:", parsedData);
+      setHistory(parsedData);
 
       // Extract unique browsers
-      const uniqueBrowsers = [...new Set(result.map(entry => entry.browser))];
+      const uniqueBrowsers = [...new Set(parsedData.map(entry => entry.browser))];
       setBrowsers(uniqueBrowsers);
 
       if (uniqueBrowsers.length > 0) {
         setSelectedBrowser(uniqueBrowsers[0]);
       }
 
-      updateProfiles(result, uniqueBrowsers[0]);
+      updateProfiles(parsedData, uniqueBrowsers[0]);
     } catch (error) {
       console.error("Failed to fetch browser history:", error);
       setError("Failed to fetch browser history.");

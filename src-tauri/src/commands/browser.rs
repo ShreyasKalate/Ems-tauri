@@ -181,7 +181,7 @@ fn extract_history(profiles: Vec<(PathBuf, String, String)>) -> Vec<BrowserHisto
 }
 
 #[tauri::command]
-pub fn get_browser_history() -> Result<Vec<BrowserHistory>, String> {
+pub fn get_browser_history() -> String {
     let mut all_history = Vec::new();
 
     let chrome_profiles = get_browser_profiles("\\AppData\\Local\\Google\\Chrome\\User Data", "Chrome");
@@ -205,5 +205,5 @@ pub fn get_browser_history() -> Result<Vec<BrowserHistory>, String> {
     };
     all_history.extend(extract_history(firefox_profiles));
 
-    Ok(all_history)
+    serde_json::to_string(&all_history).unwrap_or_else(|_| "[]".to_string()) // Convert to JSON
 }

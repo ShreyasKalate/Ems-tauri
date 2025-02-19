@@ -6,20 +6,24 @@ const VisibleApps = () => {
 
   const fetchVisibleApps = async () => {
     try {
-      const result = await invoke("get_visible_apps");
-      setApps(result);
+      const response = await invoke("get_visible_apps");
+      const parsedData = JSON.parse(response);
+      console.log("Visible applications fetched:", parsedData);
+      setApps(parsedData);
     } catch (error) {
       console.error("Failed to fetch visible applications:", error);
     }
   };
 
   useEffect(() => {
-    fetchVisibleApps(); // Initial fetch
+    fetchVisibleApps();
 
     const interval = setInterval(async () => {
       try {
-        const result = await invoke("get_visible_apps");
-        setApps(result);
+        const response = await invoke("get_visible_apps");
+        const parsedData = JSON.parse(response);
+        console.log("Visible applications updated:", parsedData);
+        setApps(parsedData);
       } catch (error) {
         console.error("Error fetching visible applications:", error);
       }

@@ -53,7 +53,7 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 }
 
 #[tauri::command]
-pub fn get_visible_apps() -> Vec<VisibleApp> {
+pub fn get_visible_apps() -> String {
     let mut visible_apps: Vec<VisibleApp> = Vec::new();
     unsafe { EnumWindows(Some(enum_window_proc), LPARAM(&mut visible_apps as *mut _ as isize)); }
 
@@ -81,7 +81,7 @@ pub fn get_visible_apps() -> Vec<VisibleApp> {
         }
     }
 
-    visible_apps
+    serde_json::to_string(&visible_apps).unwrap_or_else(|_| "[]".to_string()) // Convert data to JSON format
 }
 
 fn format_duration(seconds: i64) -> String {

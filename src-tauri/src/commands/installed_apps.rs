@@ -53,7 +53,7 @@ fn get_msi_installed_apps() -> Vec<(String, String)> {
 }
 
 #[tauri::command]
-pub fn get_installed_apps() -> (Vec<InstalledApp>, Vec<InstalledApp>) {
+pub fn get_installed_apps() -> String {
     let mut system_apps: Vec<InstalledApp> = Vec::new();
     let mut user_apps: Vec<InstalledApp> = Vec::new();
     let msi_apps = get_msi_installed_apps();
@@ -103,5 +103,5 @@ pub fn get_installed_apps() -> (Vec<InstalledApp>, Vec<InstalledApp>) {
         extract_info(&hkcu, &mut user_apps);
     }
 
-    (system_apps, user_apps)
+    serde_json::to_string(&vec![system_apps, user_apps]).unwrap_or_else(|_| "[]".to_string())
 }

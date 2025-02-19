@@ -10,8 +10,10 @@ const RunningApps = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await invoke("get_running_apps");
-      setApps(result);
+      const response = await invoke("get_running_apps");
+      const parsedData = JSON.parse(response);
+      console.log("Running applications:", parsedData);
+      setApps(parsedData);
     } catch (error) {
       console.error("Failed to fetch running applications:", error);
       setError("Failed to fetch running applications.");
@@ -50,9 +52,6 @@ const RunningApps = () => {
     return () => clearInterval(interval);
   }, []);
 
-
-  
-
   return (
     <div className="p-6 bg-white shadow-md rounded-md">
       <h2 className="text-2xl font-semibold mb-4">Running Applications</h2>
@@ -88,7 +87,7 @@ const RunningApps = () => {
                   <td className="border p-2">{app.pid}</td>
                   <td className="border p-2 font-semibold">{app.name}</td>
                   <td className="border p-2">{app.cpu_usage.toFixed(2)}</td>
-                  <td className="border p-2">{(app.memory_usage / 1024 / 1024).toFixed(2)} MB</td>
+                  <td className="border p-2">{app.memory_usage_mb.toFixed(2)} MB</td>
                   <td className="border p-2">{app.start_time}</td>
                   <td className="border p-2 font-mono text-green-600">{app.running_time}</td>
                 </tr>
@@ -99,8 +98,6 @@ const RunningApps = () => {
       ) : (
         <p className="text-center text-gray-500">No running applications found.</p>
       )}
-
-
     </div>
   );
 };

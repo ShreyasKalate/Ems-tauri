@@ -3,7 +3,7 @@
 mod commands;
 use commands::{
     system::get_ram_usage,
-    apps::get_installed_apps,
+    installed_apps::get_installed_apps,
     browser::get_browser_history,
     visible_apps::get_visible_apps,
     running_apps::get_running_apps,
