@@ -33,3 +33,5 @@ screenshots = "0.8.10"
 tokio = { version = "1", features = ["full"] }
 tokio-cron-scheduler = "0.9"
 image = "0.24"
+rusb = "0.9.4"
+

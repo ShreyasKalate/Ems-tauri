@@ -8,6 +8,7 @@ use commands::{
     visible_apps::get_visible_apps,
     running_apps::get_running_apps,
     capture_screen::{get_capture_screen, start_screenshot_scheduler},
+    usb_devices::list_usb_devices,
 };
 use tauri::Manager;
 use tokio::runtime::Runtime;
@@ -28,7 +29,8 @@ fn main() {
             get_ram_usage,
             get_installed_apps,
             get_browser_history,
-            get_capture_screen
+            get_capture_screen,
+            list_usb_devices,
         ])
         .setup(|_app| {
             println!("Tauri app is running...");
