@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+use commands::system::{get_ram_usage, track_ram_usage};
 use commands::{
-    system::get_ram_usage,
     installed_apps::get_installed_apps,
     browser::get_browser_history,
     visible_apps::get_visible_apps,
@@ -10,6 +10,8 @@ use commands::{
 };
 
 fn main() {
+    track_ram_usage();
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_visible_apps,
