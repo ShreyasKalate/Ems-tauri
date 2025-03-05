@@ -3,8 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 
 const VisibleApps = () => {
   const [apps, setApps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const fetchVisibleApps = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const response = await invoke("get_visible_apps");
       const parsedData = JSON.parse(response);
@@ -12,6 +16,9 @@ const VisibleApps = () => {
       setApps(parsedData);
     } catch (error) {
       console.error("Failed to fetch visible applications:", error);
+      setError("Failed to fetch visible applications.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -35,7 +42,12 @@ const VisibleApps = () => {
   return (
     <div className="p-6 bg-white shadow-md rounded-md">
       <h2 className="text-2xl font-semibold mb-4">Visible Applications</h2>
-      {apps.length > 0 ? (
+
+      {loading ? (
+        <p className="text-center text-gray-600">Loading...</p>
+      ) : error ? (
+        <p className="text-center text-red-600">{error}</p>
+      ) : apps.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse border border-gray-300">
             <thead className="bg-gray-200">
@@ -45,6 +57,7 @@ const VisibleApps = () => {
                 <th className="border p-2">Window Title</th>
                 <th className="border p-2">Current Session</th>
                 <th className="border p-2">Total Usage</th>
+                <th className="border p-2">Top Usage</th>
               </tr>
             </thead>
             <tbody>
@@ -55,6 +68,7 @@ const VisibleApps = () => {
                   <td className="border p-2">{app.window_title}</td>
                   <td className="border p-2 font-mono text-green-600">{app.curr_session}</td>
                   <td className="border p-2 font-mono text-blue-600">{app.total_usage}</td>
+                  <td className="border p-2 font-mono text-red-600">{app.top_usage}</td>
                 </tr>
               ))}
             </tbody>
