@@ -53,6 +53,14 @@ const Sidebar = () => {
             Browser History
           </Link>
         </li>
+        <li>
+          <Link
+            to="/usb-devices"
+            className="block p-2 hover:bg-gray-700 rounded transition"
+          >
+            Usb Devices
+          </Link>
+        </li>
       </ul>
     </nav>
   );

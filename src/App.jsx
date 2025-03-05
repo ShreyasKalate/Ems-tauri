@@ -8,6 +8,7 @@ import InstalledApps from "./components/InstalledApps";
 import SystemMonitor from "./pages/SystemMonitor";
 import BrowserHistory from "./components/BrowserHistory";
 import VisibleApps from "./components/VisibleApps";
+import UsbDevices from "./components/UsbDevices";
 import "./App.css";
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
             <Route path="/installed-apps" element={<InstalledApps />} /> {/* Installed apps on click */}
             <Route path="/visible-apps" element={<VisibleApps />} />
             <Route path="/browser-history" element={<BrowserHistory />} />
+            <Route path="/usb-devices" element={<UsbDevices />} />
           </Routes>
         </main>
       </div>
