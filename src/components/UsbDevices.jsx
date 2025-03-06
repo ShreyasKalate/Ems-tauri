@@ -16,8 +16,6 @@ function UsbDevices() {
     }
 
     fetchDevices();
-
-    // Optional: Refresh USB devices list every 10 seconds
     const interval = setInterval(fetchDevices, 10000);
     return () => clearInterval(interval);
   }, []);
@@ -31,24 +29,42 @@ function UsbDevices() {
       {devices.length === 0 ? (
         <p>No USB devices found.</p>
       ) : (
-        <ul className="list-disc list-inside space-y-2">
+        <div className="space-y-4">
           {devices.map((device, index) => (
-            <li key={index} className="p-2 border border-gray-300 rounded-lg">
-              <strong>Vendor ID:</strong> {device.vendor_id} <br />
-              <strong>Product ID:</strong> {device.product_id} <br />
-              {device.manufacturer && (
-                <span>
-                  <strong>Manufacturer:</strong> {device.manufacturer} <br />
-                </span>
+            <div key={index} className="p-3 border border-gray-300 rounded-lg bg-white">
+              <h3 className="text-lg font-semibold">Device {index + 1}</h3>
+              <p><strong>Vendor ID:</strong> {device.vendor_id}</p>
+              <p><strong>Product ID:</strong> {device.product_id}</p>
+              {device.manufacturer && <p><strong>Manufacturer:</strong> {device.manufacturer}</p>}
+              {device.product && <p><strong>Product:</strong> {device.product}</p>}
+
+              {device.is_storage ? (
+                <>
+                  <p className="text-green-600 font-semibold">🖴 Storage Device (Pendrive)</p>
+                  {device.mount_path ? (
+                    <>
+                      <p><strong>Mounted At:</strong> {device.mount_path}</p>
+                      <h4 className="font-bold mt-2">📂 Files:</h4>
+                      {device.files && device.files.length > 0 ? (
+                        <ul className="list-disc list-inside">
+                          {device.files.map((file, idx) => (
+                            <li key={idx} className="text-sm text-gray-700">{file}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-gray-500">No files found.</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-red-500">🚨 Pendrive detected but not mounted!</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-blue-500">🔌 This is a non-storage USB device</p>
               )}
-              {device.product && (
-                <span>
-                  <strong>Product:</strong> {device.product}
-                </span>
-              )}
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
