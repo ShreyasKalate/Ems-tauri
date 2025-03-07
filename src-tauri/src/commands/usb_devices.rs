@@ -17,13 +17,15 @@ pub struct UsbDevice {
     product: Option<String>,
     is_storage: bool,
     mount_path: Option<String>,
-    files: Option<Vec<String>>, // List of files if storage device
+    files: Option<Vec<FileEntry>>, // List of files if storage device
 }
 
+/// Struct for file entries (folders and files)
 #[derive(Serialize)]
 pub struct FileEntry {
     name: String,
     is_dir: bool,
+    files: Option<Vec<FileEntry>>, // Nested files if it's a directory
 }
 
 /// Gets a list of all connected USB devices and returns as JSON.
@@ -65,17 +67,15 @@ pub fn get_device_info<T: UsbContext>(device: &Device<T>) -> Result<UsbDevice, S
         }
     }
 
-    // Detect if the USB is a mass storage device dynamically
     is_storage = is_usb_storage_device(&device);
 
     if is_storage {
-        // First, try to detect the USB mount path dynamically
         if let Some(mount) = get_mount_path() {
             mount_path = Some(mount.clone());
-            files = Some(read_usb_files(&mount));
+            files = Some(list_files_recursive(&mount)?);
         } else if let Some(mount) = get_dynamic_usb_mount() {
             mount_path = Some(mount.clone());
-            files = Some(read_usb_files(&mount));
+            files = Some(list_files_recursive(&mount)?);
         }
     }
 
@@ -96,7 +96,6 @@ fn is_usb_storage_device<T: UsbContext>(device: &Device<T>) -> bool {
         for interface in config.interfaces() {
             for descriptor in interface.descriptors() {
                 if descriptor.class_code() == 0x08 {
-                    // 0x08 → USB Mass Storage Device Class
                     return true;
                 }
             }
@@ -105,13 +104,12 @@ fn is_usb_storage_device<T: UsbContext>(device: &Device<T>) -> bool {
     false
 }
 
-/// Detects the newly inserted USB mount path dynamically
+/// Detects the USB mount path dynamically
 fn get_dynamic_usb_mount() -> Option<String> {
     let initial_drives = get_available_drives();
-    thread::sleep(Duration::from_secs(3)); // Allow system to mount USB
+    thread::sleep(Duration::from_secs(3));
     let new_drives = get_available_drives();
 
-    // Find the new drive (USB)
     for drive in new_drives.difference(&initial_drives) {
         return Some(drive.clone());
     }
@@ -119,12 +117,11 @@ fn get_dynamic_usb_mount() -> Option<String> {
     None
 }
 
-/// Get a list of currently available drive letters
+/// Get a list of available drive letters
 fn get_available_drives() -> HashSet<String> {
-    let possible_paths = 'A'..='Z'; // Check all possible drive letters A-Z
     let mut drives = HashSet::new();
 
-    for letter in possible_paths {
+    for letter in 'A'..='Z' {
         let path = format!("{}:/", letter);
         if fs::metadata(&path).is_ok() {
             drives.insert(path);
@@ -134,19 +131,47 @@ fn get_available_drives() -> HashSet<String> {
     drives
 }
 
-/// Reads files and folders from the USB storage device
-fn read_usb_files(mount_path: &str) -> Vec<String> {
-    fs::read_dir(mount_path)
-        .map(|entries| {
-            entries
-                .filter_map(|entry| entry.ok())
-                .map(|entry| entry.file_name().into_string().unwrap_or_default())
-                .collect()
-        })
-        .unwrap_or_else(|_| vec![]) // Return empty list if an error occurs
+/// Recursively fetches files inside folders and sorts them alphabetically
+fn list_files_recursive(path: &str) -> Result<Vec<FileEntry>, String> {
+    let mut entries = Vec::new();
+
+    let read_dir = fs::read_dir(path).map_err(|e| e.to_string())?;
+
+    for entry in read_dir {
+        if let Ok(entry) = entry {
+            let file_name = entry.file_name().into_string().unwrap_or_default();
+            let file_path = entry.path();
+            let is_dir = file_path.is_dir();
+
+            let mut file_entry = FileEntry {
+                name: file_name.clone(),
+                is_dir,
+                files: None,
+            };
+
+            if is_dir {
+                file_entry.files = Some(list_files_recursive(file_path.to_str().unwrap_or(""))?);
+            }
+
+            entries.push(file_entry);
+        }
+    }
+
+    // Sort folders first, then files, both alphabetically
+    entries.sort_by(|a, b| {
+        if a.is_dir == b.is_dir {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        } else if a.is_dir {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    });
+
+    Ok(entries)
 }
 
-/// Detects the mounted path of the USB dynamically (Windows)
+/// Detects the USB mount path (Windows)
 fn get_mount_path() -> Option<String> {
     let output = Command::new("wmic")
         .args(&["logicaldisk", "where", "DriveType=2", "get", "DeviceID"])
@@ -156,7 +181,7 @@ fn get_mount_path() -> Option<String> {
     let output_str = String::from_utf8_lossy(&output.stdout);
     let drive_letters: Vec<String> = output_str
         .lines()
-        .skip(1) // Skip header
+        .skip(1)
         .filter_map(|line| {
             let drive = line.trim();
             if !drive.is_empty() {
@@ -169,16 +194,3 @@ fn get_mount_path() -> Option<String> {
 
     drive_letters.into_iter().find(|path| Path::new(path).exists())
 }
-
-/// Retrieves the contents of a folder inside the USB
-#[tauri::command]
-pub fn list_files_in_directory(path: String) -> Result<Vec<FileEntry>, String> {
-    Ok(read_usb_files(&path)
-        .into_iter()
-        .map(|name| FileEntry { 
-            name: name.clone(),  // Clone the name to prevent move error
-            is_dir: Path::new(&name).is_dir() 
-        })
-        .collect())
-}
-
