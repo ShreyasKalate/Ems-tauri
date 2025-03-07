@@ -1,7 +1,7 @@
 use rusb::{Context, Device, DeviceDescriptor, UsbContext};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::fs::{self, read_dir};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::thread;
@@ -18,6 +18,12 @@ pub struct UsbDevice {
     is_storage: bool,
     mount_path: Option<String>,
     files: Option<Vec<String>>, // List of files if storage device
+}
+
+#[derive(Serialize)]
+pub struct FileEntry {
+    name: String,
+    is_dir: bool,
 }
 
 /// Gets a list of all connected USB devices and returns as JSON.
@@ -59,17 +65,17 @@ pub fn get_device_info<T: UsbContext>(device: &Device<T>) -> Result<UsbDevice, S
         }
     }
 
-    // Check if device is a storage device (Pendrive)
-    if is_pendrive(descriptor.vendor_id(), descriptor.product_id()) {
-        is_storage = true;
+    // Detect if the USB is a mass storage device dynamically
+    is_storage = is_usb_storage_device(&device);
 
+    if is_storage {
         // First, try to detect the USB mount path dynamically
         if let Some(mount) = get_mount_path() {
             mount_path = Some(mount.clone());
-            files = Some(read_usb_files(&mount)); // Read files from the correct path
+            files = Some(read_usb_files(&mount));
         } else if let Some(mount) = get_dynamic_usb_mount() {
             mount_path = Some(mount.clone());
-            files = Some(read_usb_files(&mount)); // Read files if detected
+            files = Some(read_usb_files(&mount));
         }
     }
 
@@ -84,19 +90,25 @@ pub fn get_device_info<T: UsbContext>(device: &Device<T>) -> Result<UsbDevice, S
     })
 }
 
-/// Function to check if a USB device is a pendrive (Modify for specific vendors)
-fn is_pendrive(vendor_id: u16, _product_id: u16) -> bool {
-    let storage_vendors = vec![0x0781, 0x090C, 0x0951, 0x13FE, 0x058F, 0x1A2C, 0x0930]; // SanDisk, Kingston, etc.
-    storage_vendors.contains(&vendor_id)
+/// **Checks if a USB device is a storage device based on its class**
+fn is_usb_storage_device<T: UsbContext>(device: &Device<T>) -> bool {
+    if let Ok(config) = device.active_config_descriptor() {
+        for interface in config.interfaces() {
+            for descriptor in interface.descriptors() {
+                if descriptor.class_code() == 0x08 {
+                    // 0x08 → USB Mass Storage Device Class
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Detects the newly inserted USB mount path dynamically
 fn get_dynamic_usb_mount() -> Option<String> {
     let initial_drives = get_available_drives();
-
-    // Wait for a few seconds to allow the system to mount the USB
-    thread::sleep(Duration::from_secs(3));
-
+    thread::sleep(Duration::from_secs(3)); // Allow system to mount USB
     let new_drives = get_available_drives();
 
     // Find the new drive (USB)
@@ -122,19 +134,19 @@ fn get_available_drives() -> HashSet<String> {
     drives
 }
 
-/// Reads files from the USB storage device
+/// Reads files and folders from the USB storage device
 fn read_usb_files(mount_path: &str) -> Vec<String> {
     fs::read_dir(mount_path)
         .map(|entries| {
             entries
                 .filter_map(|entry| entry.ok())
-                .filter_map(|entry| entry.path().file_name()?.to_str().map(String::from))
+                .map(|entry| entry.file_name().into_string().unwrap_or_default())
                 .collect()
         })
         .unwrap_or_else(|_| vec![]) // Return empty list if an error occurs
 }
 
-/// Function to detect the mounted path of the USB dynamically (Windows)
+/// Detects the mounted path of the USB dynamically (Windows)
 fn get_mount_path() -> Option<String> {
     let output = Command::new("wmic")
         .args(&["logicaldisk", "where", "DriveType=2", "get", "DeviceID"])
@@ -157,3 +169,16 @@ fn get_mount_path() -> Option<String> {
 
     drive_letters.into_iter().find(|path| Path::new(path).exists())
 }
+
+/// Retrieves the contents of a folder inside the USB
+#[tauri::command]
+pub fn list_files_in_directory(path: String) -> Result<Vec<FileEntry>, String> {
+    Ok(read_usb_files(&path)
+        .into_iter()
+        .map(|name| FileEntry { 
+            name: name.clone(),  // Clone the name to prevent move error
+            is_dir: Path::new(&name).is_dir() 
+        })
+        .collect())
+}
+

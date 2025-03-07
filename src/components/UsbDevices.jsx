@@ -21,32 +21,36 @@ function UsbDevices() {
   }, []);
 
   return (
-    <div className="p-4 bg-gray-100 rounded-lg shadow-md">
-      <h2 className="text-xl font-bold mb-3">Connected USB Devices</h2>
+    <div className="p-6 bg-gray-100 rounded-lg shadow-md">
+      <h2 className="text-2xl font-bold mb-4">Connected USB Devices</h2>
 
-      {error && <p className="text-red-500">{error}</p>}
+      {error && <p className="text-red-500 font-semibold">{error}</p>}
 
       {devices.length === 0 ? (
-        <p>No USB devices found.</p>
+        <p className="text-gray-500">No USB devices found.</p>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {devices.map((device, index) => (
-            <div key={index} className="p-3 border border-gray-300 rounded-lg bg-white">
-              <h3 className="text-lg font-semibold">Device {index + 1}</h3>
-              <p><strong>Vendor ID:</strong> {device.vendor_id}</p>
-              <p><strong>Product ID:</strong> {device.product_id}</p>
-              {device.manufacturer && <p><strong>Manufacturer:</strong> {device.manufacturer}</p>}
-              {device.product && <p><strong>Product:</strong> {device.product}</p>}
+            <div key={index} className="p-4 border border-gray-300 rounded-lg bg-white shadow-sm">
+              <h3 className="text-lg font-semibold mb-1">Device {index + 1}</h3>
+              <p className="text-gray-600"><strong>Vendor ID:</strong> {device.vendor_id}</p>
+              <p className="text-gray-600"><strong>Product ID:</strong> {device.product_id}</p>
+              {device.manufacturer && (
+                <p className="text-gray-600"><strong>Manufacturer:</strong> {device.manufacturer}</p>
+              )}
+              {device.product && (
+                <p className="text-gray-600"><strong>Product:</strong> {device.product}</p>
+              )}
 
               {device.is_storage ? (
                 <>
-                  <p className="text-green-600 font-semibold">🖴 Storage Device (Pendrive)</p>
+                  <p className="text-green-600 font-semibold mt-2">🖴 Storage Device (Pendrive)</p>
                   {device.mount_path ? (
                     <>
-                      <p><strong>Mounted At:</strong> {device.mount_path}</p>
-                      <h4 className="font-bold mt-2">📂 Files:</h4>
+                      <p className="text-gray-700"><strong>Mounted At:</strong> {device.mount_path}</p>
+                      <h4 className="font-bold mt-3">📂 Files:</h4>
                       {device.files && device.files.length > 0 ? (
-                        <ul className="list-disc list-inside">
+                        <ul className="list-disc list-inside bg-gray-50 p-2 rounded-md max-h-40 overflow-y-auto">
                           {device.files.map((file, idx) => (
                             <li key={idx} className="text-sm text-gray-700">{file}</li>
                           ))}
@@ -56,11 +60,11 @@ function UsbDevices() {
                       )}
                     </>
                   ) : (
-                    <p className="text-red-500">🚨 Pendrive detected but not mounted!</p>
+                    <p className="text-red-500 font-semibold">🚨 Pendrive detected but not mounted!</p>
                   )}
                 </>
               ) : (
-                <p className="text-blue-500">🔌 This is a non-storage USB device</p>
+                <p className="text-blue-500 mt-2">🔌 Non-Storage USB Device</p>
               )}
             </div>
           ))}
