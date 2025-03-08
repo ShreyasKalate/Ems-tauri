@@ -11,14 +11,16 @@ use commands::{
     usb_devices::list_usb_devices,
     usb_monitor::monitor_usb_file_transfers,
 };
-use tauri::Manager;
 use tokio::runtime::Runtime;
 
 fn main() {
     track_ram_usage();
-    monitor_usb_file_transfers();
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
+
+    runtime.spawn(async {
+        monitor_usb_file_transfers();
+    });
 
     runtime.spawn(async {
         start_screenshot_scheduler().await;
@@ -33,6 +35,7 @@ fn main() {
             get_browser_history,
             get_capture_screen,
             list_usb_devices,
+            monitor_usb_file_transfers,
         ])
         .setup(|_app| {
             println!("Tauri app is running...");

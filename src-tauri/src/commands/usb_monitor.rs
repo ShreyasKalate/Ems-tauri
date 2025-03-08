@@ -3,6 +3,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::path::Path;
 use std::process::Command;
 use tauri::command;
+use tokio::task;
 
 /// Function to get USB mount path
 fn get_mount_path() -> Option<String> {
@@ -25,31 +26,36 @@ fn get_mount_path() -> Option<String> {
         })
         .collect();
 
-    drive_letters.into_iter().find(|path| Path::new(path).exists())
+    drive_letters
+        .into_iter()
+        .find(|path| Path::new(path).exists())
 }
 
-/// Starts USB file monitoring
+/// Starts USB file monitoring (Runs asynchronously)
 #[command]
-pub fn monitor_usb_file_transfers() -> Result<(), String> {
-    let (tx, rx): (mpsc::Sender<Result<Event, notify::Error>>, Receiver<Result<Event, notify::Error>>) = mpsc::channel(); // ✅ Fixed generic issue
-    let mut watcher = recommended_watcher(tx).map_err(|e| e.to_string())?;
+pub fn monitor_usb_file_transfers() {
+    task::spawn_blocking(|| {
+        let (tx, rx): (
+            mpsc::Sender<Result<Event, notify::Error>>,
+            Receiver<Result<Event, notify::Error>>,
+        ) = mpsc::channel();
+        let mut watcher = recommended_watcher(tx).expect("Failed to create watcher");
 
-    if let Some(usb_path) = get_mount_path() {
-        println!("Watching USB drive: {}", usb_path);
-        watcher
-            .watch(Path::new(&usb_path), RecursiveMode::Recursive)
-            .map_err(|e| e.to_string())?;
-    } else {
-        println!("No USB drive detected.");
-        return Ok(());
-    }
-
-    for res in rx {
-        match res {
-            Ok(event) => println!("USB event: {:?}", event),
-            Err(e) => eprintln!("watch error: {:?}", e.to_string()), // ✅ Convert error to string
+        if let Some(usb_path) = get_mount_path() {
+            println!("Watching USB drive: {}", usb_path);
+            watcher
+                .watch(Path::new(&usb_path), RecursiveMode::Recursive)
+                .expect("Failed to watch USB drive");
+        } else {
+            println!("No USB drive detected.");
+            return;
         }
-    }
 
-    Ok(())
+        for res in rx {
+            match res {
+                Ok(event) => println!("USB event: {:?}", event),
+                Err(e) => eprintln!("watch error: {:?}", e),
+            }
+        }
+    });
 }
