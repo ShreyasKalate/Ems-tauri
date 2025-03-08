@@ -22,7 +22,7 @@ function UsbDevices() {
 
   function renderFileStructure(files) {
     return (
-      <ul className="list-disc list-inside bg-gray-50 p-2 rounded-md max-h-100 overflow-y-auto">
+      <ul className="list-disc list-inside bg-gray-50 p-2 rounded-md max-h-60 overflow-y-auto">
         {files.map((file, index) => (
           <li key={index} className="text-sm text-gray-700 ml-4">
             {file.is_dir ? (
@@ -50,11 +50,45 @@ function UsbDevices() {
       ) : (
         <div className="space-y-5">
           {devices.map((device, index) => (
-            <div key={index} className="p-4 border border-gray-300 rounded-lg bg-white shadow-sm">
-              <h3 className="text-lg font-semibold mb-1">Device {index + 1}</h3>
-              <p className="text-gray-600"><strong>Vendor ID:</strong> {device.vendor_id}</p>
-              <p className="text-gray-600"><strong>Product ID:</strong> {device.product_id}</p>
-              {device.is_storage && device.mount_path && device.files ? renderFileStructure(device.files) : null}
+            <div
+              key={index}
+              className={`p-4 border rounded-lg bg-white shadow-sm ${
+                device.is_storage ? "border-blue-400" : "border-gray-400"
+              }`}
+            >
+              <h3 className="text-lg font-semibold mb-1 flex items-center">
+                {device.is_storage ? "📦 Storage Device" : "💻 Non-Storage Device"} {index + 1}
+              </h3>
+              <p className="text-gray-600">
+                <strong>Vendor ID:</strong> {device.vendor_id}
+              </p>
+              <p className="text-gray-600">
+                <strong>Product ID:</strong> {device.product_id}
+              </p>
+              {device.manufacturer && (
+                <p className="text-gray-600">
+                  <strong>Manufacturer:</strong> {device.manufacturer}
+                </p>
+              )}
+              {device.product && (
+                <p className="text-gray-600">
+                  <strong>Product Name:</strong> {device.product}
+                </p>
+              )}
+
+              {/* Storage Device Info */}
+              {device.is_storage && device.mount_path && (
+                <>
+                  <p className="text-gray-600">
+                    <strong>Mount Path:</strong> {device.mount_path}
+                  </p>
+                  {device.files && device.files.length > 0 ? (
+                    <div className="mt-2">{renderFileStructure(device.files)}</div>
+                  ) : (
+                    <p className="text-gray-500 italic">No files found.</p>
+                  )}
+                </>
+              )}
             </div>
           ))}
         </div>

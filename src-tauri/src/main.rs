@@ -9,12 +9,14 @@ use commands::{
     running_apps::get_running_apps,
     capture_screen::{get_capture_screen, start_screenshot_scheduler},
     usb_devices::list_usb_devices,
+    usb_monitor::monitor_usb_file_transfers,
 };
 use tauri::Manager;
 use tokio::runtime::Runtime;
 
 fn main() {
     track_ram_usage();
+    monitor_usb_file_transfers();
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
 
