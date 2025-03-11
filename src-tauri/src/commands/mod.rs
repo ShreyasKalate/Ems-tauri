@@ -6,3 +6,4 @@ pub mod visible_apps;
 pub mod capture_screen;
 pub mod usb_devices;
 pub mod usb_monitor;
+pub mod afk_tracker;

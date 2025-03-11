@@ -10,6 +10,7 @@ import BrowserHistory from "./components/BrowserHistory";
 import VisibleApps from "./components/VisibleApps";
 import UsbDevices from "./components/UsbDevices";
 import "./App.css";
+import AfkTracker from "./components/afkTracker";
 
 function App() {
   useEffect(() => {
@@ -41,6 +42,7 @@ function App() {
             <Route path="/visible-apps" element={<VisibleApps />} />
             <Route path="/browser-history" element={<BrowserHistory />} />
             <Route path="/usb-devices" element={<UsbDevices />} />
+            <Route path="/afk-tracker" element={<AfkTracker />} />
           </Routes>
         </main>
       </div>

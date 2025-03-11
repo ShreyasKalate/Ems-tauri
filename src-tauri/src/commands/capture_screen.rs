@@ -39,7 +39,7 @@ pub async fn get_capture_screen() -> Result<String, String> {
     let filename = format!("screenshot-{}.jpg", formatted_time);
     let filepath: PathBuf = screenshot_path.join(&filename);
 
-    // Compress and save as JPEG (Quality: 50%)
+    // Compress and save as JPEG (Quality: 70%)
     let mut output_file = File::create(&filepath).map_err(|e| e.to_string())?;
     resized_img.write_to(&mut output_file, ImageOutputFormat::Jpeg(70)) // Adjust quality 40-50KB
         .map_err(|e| e.to_string())?;
