@@ -9,8 +9,10 @@ import SystemMonitor from "./pages/SystemMonitor";
 import BrowserHistory from "./components/BrowserHistory";
 import VisibleApps from "./components/VisibleApps";
 import UsbDevices from "./components/UsbDevices";
-import "./App.css";
 import AfkTracker from "./components/afkTracker";
+import NetworkTracker from "./components/NetworkTracker";
+
+import "./App.css";
 
 function App() {
   useEffect(() => {
@@ -38,11 +40,12 @@ function App() {
             <Route path="/" element={<h2>Home Page</h2>} />
             <Route path="/system-monitor" element={<SystemMonitor />} />
             <Route path="/running-apps" element={<RunningApps />} />
-            <Route path="/installed-apps" element={<InstalledApps />} /> {/* Installed apps on click */}
+            <Route path="/installed-apps" element={<InstalledApps />} />
             <Route path="/visible-apps" element={<VisibleApps />} />
             <Route path="/browser-history" element={<BrowserHistory />} />
             <Route path="/usb-devices" element={<UsbDevices />} />
             <Route path="/afk-tracker" element={<AfkTracker />} />
+            <Route path="/network-tracker" element={<NetworkTracker />} />
           </Routes>
         </main>
       </div>

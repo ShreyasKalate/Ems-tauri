@@ -11,6 +11,7 @@ use commands::{
     usb_devices::list_usb_devices,
     usb_monitor::monitor_usb_file_transfers,
     afk_tracker::{start_afk_tracker, get_afk_status},
+    network_monitor::{get_network_info, get_connected_devices_list},
 };
 use tokio::runtime::Runtime;
 
@@ -39,6 +40,8 @@ fn main() {
             get_capture_screen,
             list_usb_devices,
             monitor_usb_file_transfers,
+            get_network_info,
+            get_connected_devices_list,
         ])
         .setup(|_app| {
             println!("Tauri app is running...");

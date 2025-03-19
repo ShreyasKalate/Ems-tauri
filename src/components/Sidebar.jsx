@@ -69,6 +69,14 @@
               Afk Tracker
             </Link>
           </li>
+          <li>
+            <Link
+              to="/network-tracker"
+              className="block p-2 hover:bg-gray-700 rounded transition"
+            >
+              Network Tracker
+            </Link>
+          </li>
         </ul>
       </nav>
     );

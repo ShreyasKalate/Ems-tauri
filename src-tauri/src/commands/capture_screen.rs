@@ -1,7 +1,7 @@
 use screenshots::Screen;
 use std::fs::{create_dir_all, File};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use image::{DynamicImage, ImageOutputFormat, imageops::FilterType};
 use chrono::prelude::*; // For handling IST time
 use tokio::time;

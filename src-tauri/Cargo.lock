@@ -1075,6 +1075,7 @@ dependencies = [
  "lazy_static",
  "notify",
  "once_cell",
+ "regex",
  "rusb",
  "rusqlite",
  "screenshots",
