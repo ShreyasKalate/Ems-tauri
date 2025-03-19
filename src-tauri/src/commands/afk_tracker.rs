@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Duration as ChronoDuration, Local};
 use device_query::{DeviceQuery, DeviceState};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -11,8 +11,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINF
 pub struct AfkData {
     last_active: String,
     afk_start: Option<String>,
-    afk_end: Option<String>,
-    afk_duration: Option<String>,
+    afk_session: String,  // ✅ Tracks current AFK session
+    total_afk_duration: String,  // ✅ Tracks total AFK time
     is_afk: bool,
 }
 
@@ -20,7 +20,8 @@ pub struct AfkData {
 struct AfkState {
     last_activity: Instant,
     afk_start: Option<DateTime<Local>>,
-    afk_end: Option<DateTime<Local>>,
+    total_afk_duration: ChronoDuration,  // ✅ Keeps accumulating
+    afk_session: ChronoDuration,  // ✅ Resets after user returns
     is_afk: bool,
 }
 
@@ -29,7 +30,8 @@ impl AfkState {
         Self {
             last_activity: Instant::now(),
             afk_start: None,
-            afk_end: None,
+            total_afk_duration: ChronoDuration::zero(),
+            afk_session: ChronoDuration::zero(),
             is_afk: false,
         }
     }
@@ -65,78 +67,75 @@ pub fn start_afk_tracker() {
         let keys = device_state.get_keys();
         let mouse = device_state.get_mouse();
         let idle_time = get_idle_time();
-    
+
         let mut state = afk_state.lock().unwrap();
-    
-        // ✅ If user is active, reset AFK state
+        let now = Local::now();
+
         if !keys.is_empty() || mouse.button_pressed.iter().any(|&b| b) {
             if state.is_afk {
-                state.afk_end = Some(Local::now());
-                let duration = state.afk_end.unwrap() - state.afk_start.unwrap();
+                let session_duration = now.signed_duration_since(state.afk_start.unwrap());
+                state.total_afk_duration = state.total_afk_duration + session_duration;
+                
                 println!(
-                    "✅ User returned at: {} (AFK for: {:?})",
-                    state.afk_end.unwrap(),
-                    duration
+                    "✅ User returned! AFK session: {:?}, Total AFK Time: {:?}",
+                    session_duration, state.total_afk_duration
                 );
-    
-                // 🛠 Reset AFK state
+
+                // 🛠 Reset only `afk_session`, keep `total_afk_duration`
                 state.is_afk = false;
                 state.afk_start = None;
-                state.afk_end = None;
+                state.afk_session = ChronoDuration::zero();
             }
             state.last_activity = Instant::now();
         } 
-        // 🚨 If idle time exceeds threshold, mark as AFK
         else if idle_time >= idle_threshold {
             if !state.is_afk {
-                state.afk_start = Some(Local::now());
+                state.afk_start = Some(now);
                 state.is_afk = true;
+                println!("🚨 AFK Triggered! Threshold reached.");
+            } else {
+                // ✅ Keep increasing session time but **do not reset total time**
+                let session_duration = now.signed_duration_since(state.afk_start.unwrap());
+                state.afk_session = session_duration;
+                state.total_afk_duration = state.total_afk_duration + ChronoDuration::seconds(1); // 1 sec increase per tick
+
                 println!(
-                    "🚨 AFK Triggered! Idle Time: {:?}, Threshold: {:?}, AFK State: {}",
-                    idle_time, idle_threshold, state.is_afk
+                    "⏳ Still AFK | AFK Session: {:?} | Total AFK Time: {:?}",
+                    state.afk_session, state.total_afk_duration
                 );
             }
-        } 
-        // 🔄 If AFK but idle time resets, user has returned!
-        else if state.is_afk && idle_time < idle_threshold {
-            state.is_afk = false;
-            state.afk_start = None;
-            state.afk_end = None;
-            println!("✅ User is back! Resetting AFK state.");
         }
-    
+
         println!(
-            "🕒 Idle time: {:?}, is_afk: {}",
-            idle_time, state.is_afk
+            "🕒 Idle time: {:?}, is_afk: {}, AFK Session: {}s, Total AFK Time: {}s",
+            idle_time,
+            state.is_afk,
+            state.afk_session.num_seconds(),
+            state.total_afk_duration.num_seconds()
         );
-    
+
         thread::sleep(Duration::from_secs(1));
     });
-    }
+}
 
 #[command]
 pub fn get_afk_status() -> AfkData {
     let state = AFK_STATE.lock().unwrap();
 
     println!(
-        "📡 Fetching AFK Status: is_afk={} last_active={}s afk_start={:?} afk_end={:?}",
+        "📡 Fetching AFK Status: is_afk={} last_active={}s afk_start={:?} afk_session={}s total_afk_time={}s",
         state.is_afk,
         state.last_activity.elapsed().as_secs(),
         state.afk_start,
-        state.afk_end
+        state.afk_session.num_seconds(),
+        state.total_afk_duration.num_seconds()
     );
-
-    let afk_duration = if let (Some(start), Some(end)) = (state.afk_start, state.afk_end) {
-        Some(format!("{:?}", end - start))
-    } else {
-        None
-    };
 
     AfkData {
         last_active: state.last_activity.elapsed().as_secs().to_string(),
         afk_start: state.afk_start.map(|t| t.to_string()),
-        afk_end: state.afk_end.map(|t| t.to_string()),
-        afk_duration,
+        afk_session: format!("{}s", state.afk_session.num_seconds()),  // ✅ Resets after user returns
+        total_afk_duration: format!("{}s", state.total_afk_duration.num_seconds()),  // ✅ Keeps accumulating
         is_afk: state.is_afk,
     }
 }
