@@ -11,8 +11,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINF
 pub struct AfkData {
     last_active: String,
     afk_start: Option<String>,
-    afk_session: String,  // ✅ Tracks current AFK session
-    total_afk_duration: String,  // ✅ Tracks total AFK time
+    afk_session: String,  
+    total_afk_duration: String,  
     is_afk: bool,
 }
 
@@ -20,8 +20,9 @@ pub struct AfkData {
 struct AfkState {
     last_activity: Instant,
     afk_start: Option<DateTime<Local>>,
-    total_afk_duration: ChronoDuration,  // ✅ Keeps accumulating
-    afk_session: ChronoDuration,  // ✅ Resets after user returns
+    total_afk_duration: ChronoDuration,  
+    afk_session: ChronoDuration,  
+    last_mouse_pos: (i32, i32),  
     is_afk: bool,
 }
 
@@ -32,6 +33,7 @@ impl AfkState {
             afk_start: None,
             total_afk_duration: ChronoDuration::zero(),
             afk_session: ChronoDuration::zero(),
+            last_mouse_pos: (0, 0),
             is_afk: false,
         }
     }
@@ -60,22 +62,27 @@ static AFK_STATE: once_cell::sync::Lazy<Arc<Mutex<AfkState>>> =
 pub fn start_afk_tracker() {
     let afk_state = Arc::clone(&AFK_STATE);
     let idle_threshold = Duration::from_secs(10); // 10 seconds
-
     let device_state = DeviceState::new();
 
     thread::spawn(move || loop {
         let keys = device_state.get_keys();
         let mouse = device_state.get_mouse();
         let idle_time = get_idle_time();
-
-        let mut state = afk_state.lock().unwrap();
         let now = Local::now();
 
-        if !keys.is_empty() || mouse.button_pressed.iter().any(|&b| b) {
+        let mut state = afk_state.lock().unwrap();
+        let new_mouse_pos = (mouse.coords.0, mouse.coords.1);  
+
+        let has_user_activity = 
+            !keys.is_empty() || 
+            new_mouse_pos != state.last_mouse_pos ||  
+            mouse.button_pressed.iter().any(|&b| b); 
+
+        if has_user_activity {
             if state.is_afk {
                 let session_duration = now.signed_duration_since(state.afk_start.unwrap());
-                state.total_afk_duration = state.total_afk_duration + session_duration;
-                
+                state.total_afk_duration = state.total_afk_duration + session_duration;  // ✅ Add only once per session
+
                 println!(
                     "✅ User returned! AFK session: {:?}, Total AFK Time: {:?}",
                     session_duration, state.total_afk_duration
@@ -88,6 +95,7 @@ pub fn start_afk_tracker() {
             }
             state.last_activity = Instant::now();
         } 
+        // 🚨 Detect AFK when idle time exceeds threshold
         else if idle_time >= idle_threshold {
             if !state.is_afk {
                 state.afk_start = Some(now);
@@ -97,7 +105,6 @@ pub fn start_afk_tracker() {
                 // ✅ Keep increasing session time but **do not reset total time**
                 let session_duration = now.signed_duration_since(state.afk_start.unwrap());
                 state.afk_session = session_duration;
-                state.total_afk_duration = state.total_afk_duration + ChronoDuration::seconds(1); // 1 sec increase per tick
 
                 println!(
                     "⏳ Still AFK | AFK Session: {:?} | Total AFK Time: {:?}",
@@ -105,6 +112,9 @@ pub fn start_afk_tracker() {
                 );
             }
         }
+
+        // ✅ Update last known mouse position after processing
+        state.last_mouse_pos = new_mouse_pos;  
 
         println!(
             "🕒 Idle time: {:?}, is_afk: {}, AFK Session: {}s, Total AFK Time: {}s",
@@ -134,8 +144,8 @@ pub fn get_afk_status() -> AfkData {
     AfkData {
         last_active: state.last_activity.elapsed().as_secs().to_string(),
         afk_start: state.afk_start.map(|t| t.to_string()),
-        afk_session: format!("{}s", state.afk_session.num_seconds()),  // ✅ Resets after user returns
-        total_afk_duration: format!("{}s", state.total_afk_duration.num_seconds()),  // ✅ Keeps accumulating
+        afk_session: format!("{}s", state.afk_session.num_seconds()),  
+        total_afk_duration: format!("{}s", state.total_afk_duration.num_seconds()),  
         is_afk: state.is_afk,
     }
 }
