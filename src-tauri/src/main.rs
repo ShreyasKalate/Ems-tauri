@@ -5,7 +5,7 @@ use commands::{
     system::{get_ram_usage, track_ram_usage},
     installed_apps::get_installed_apps,
     browser::get_browser_history,
-    visible_apps::get_visible_apps,
+    visible_apps::track_visible_apps,
     running_apps::get_running_apps,
     capture_screen::{get_capture_screen, start_screenshot_scheduler},
     usb_devices::list_usb_devices,
@@ -16,7 +16,8 @@ use tokio::runtime::Runtime;
 
 fn main() {
     track_ram_usage();
-    start_afk_tracker();    
+    start_afk_tracker();
+    track_visible_apps();
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
 
@@ -31,7 +32,6 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_afk_status,
-            get_visible_apps,
             get_running_apps,
             get_ram_usage,
             get_installed_apps,

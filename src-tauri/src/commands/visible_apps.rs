@@ -1,25 +1,42 @@
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GetForegroundWindow
-};
+use rusqlite::{params, Connection};
+use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
-use std::collections::HashMap;
 use std::sync::Mutex;
 use chrono::{Utc, Duration};
 use serde::{Serialize, Deserialize};
 
 lazy_static::lazy_static! {
-    static ref PROCESS_TIMES: Mutex<HashMap<String, (i64, i64, bool)>> = Mutex::new(HashMap::new());
-    static ref TOP_PROCESS_TIMES: Mutex<HashMap<String, (i64, i64, bool)>> = Mutex::new(HashMap::new());
+    static ref DB_CONN: Mutex<Connection> = Mutex::new(
+        Connection::open("ems_data.db").expect("Failed to open database")
+    );
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct VisibleApp {
-    name: String,
+struct VisibleApp {
     pid: u32,
+    name: String,
     window_title: String,
-    curr_session: String,
-    total_usage: String,
-    top_usage: String,
+    curr_session: i64,
+    total_usage: i64,
+    top_usage: i64,
+}
+
+pub fn init_db() {
+    let conn = DB_CONN.lock().unwrap();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS visible_apps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pid INTEGER,
+            name TEXT,
+            window_title TEXT,
+            curr_session INTEGER, 
+            total_usage INTEGER, 
+            top_usage INTEGER, 
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(pid, name, window_title)
+        )",
+        [],
+    ).expect("Failed to create visible_apps table");
 }
 
 unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -32,96 +49,57 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
 
-        let now = Utc::now().timestamp();
-        let mut process_times = PROCESS_TIMES.lock().unwrap();
-        let mut top_process_times = TOP_PROCESS_TIMES.lock().unwrap();
-        
-        let (total_time, last_update, is_running) = process_times.entry(window_title.clone()).or_insert((0, now, false));
-        if !*is_running {
-            *last_update = now;
-            *is_running = true;
-        }
-        let elapsed = now - *last_update;
-        *total_time += elapsed;
-        *last_update = now;
-
-        // Check if this is the topmost window
-        let foreground_hwnd = GetForegroundWindow();
-        let is_topmost = hwnd == foreground_hwnd;
-
-        // Track "top usage" time separately
-        let (top_time, top_last_update, is_top_running) = top_process_times.entry(window_title.clone()).or_insert((0, now, false));
-        if is_topmost {
-            if !*is_top_running {
-                *top_last_update = now;
-                *is_top_running = true;
-            }
-            let top_elapsed = now - *top_last_update;
-            *top_time += top_elapsed;
-            *top_last_update = now;
-        } else {
-            *is_top_running = false;
-        }
-
         visible_apps.push(VisibleApp {
-            name: window_title.clone(),
             pid,
+            name: window_title.clone(),
             window_title,
-            curr_session: format_duration(elapsed),
-            total_usage: format_duration(*total_time),
-            top_usage: format_duration(*top_time),
+            curr_session: 0,
+            total_usage: 0,
+            top_usage: 0,
         });
     }
-
     true.into()
 }
 
-#[tauri::command]
-pub fn get_visible_apps() -> String {
+pub fn update_visible_apps_db() {
+    let conn = DB_CONN.lock().unwrap();
     let mut visible_apps: Vec<VisibleApp> = Vec::new();
     unsafe { EnumWindows(Some(enum_window_proc), LPARAM(&mut visible_apps as *mut _ as isize)); }
 
-    let mut process_times = PROCESS_TIMES.lock().unwrap();
-    let mut top_process_times = TOP_PROCESS_TIMES.lock().unwrap();
     let now = Utc::now().timestamp();
+    for app in visible_apps {
+        conn.execute(
+            "INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
+             VALUES (?1, ?2, ?3, 0, 0, 0, CURRENT_TIMESTAMP) 
+             ON CONFLICT(pid, name, window_title) DO UPDATE 
+             SET curr_session = curr_session + 1, 
+                 total_usage = total_usage + 1, 
+                 top_usage = CASE WHEN ?4 THEN top_usage + 1 ELSE top_usage END, 
+                 last_seen = CURRENT_TIMESTAMP",
+            params![app.pid, app.name, app.window_title, is_topmost_window(app.pid)],
+        ).expect("Failed to insert/update visible app");
 
-    let current_names: Vec<String> = visible_apps.iter().map(|app| app.name.clone()).collect();
-
-    for (name, (total_time, last_update, is_running)) in process_times.iter_mut() {
-        if !current_names.contains(name) && *is_running {
-            let elapsed = now - *last_update;
-            *total_time += elapsed;
-            *is_running = false;
-        }
+        println!(
+            "Tracking: PID={} Name={} Title={} Session={} Total={} Top={} Time={}",
+            app.pid, app.name, app.window_title, 1, 1, is_topmost_window(app.pid) as i64, now
+        );
     }
-
-    for (name, (top_time, top_last_update, is_top_running)) in top_process_times.iter_mut() {
-        if !current_names.contains(name) && *is_top_running {
-            let elapsed = now - *top_last_update;
-            *top_time += elapsed;
-            *is_top_running = false;
-        }
-    }
-
-    // Add inactive apps to the list
-    for (name, (total_time, _, _)) in process_times.iter() {
-        let top_time = top_process_times.get(name).map(|(t, _, _)| *t).unwrap_or(0);
-        if !current_names.contains(name) {
-            visible_apps.push(VisibleApp {
-                name: name.clone(),
-                pid: 0,
-                window_title: String::from("N/A"),
-                curr_session: String::from("00:00:00"),
-                total_usage: format_duration(*total_time),
-                top_usage: format_duration(top_time),
-            });
-        }
-    }
-
-    serde_json::to_string(&visible_apps).unwrap_or_else(|_| "[]".to_string()) // Convert data to JSON format
 }
 
-fn format_duration(seconds: i64) -> String {
-    let duration = Duration::seconds(seconds);
-    format!("{:02}:{:02}:{:02}", duration.num_hours(), duration.num_minutes() % 60, duration.num_seconds() % 60)
+/// **Checks if the window is the topmost active window**
+fn is_topmost_window(pid: u32) -> bool {
+    unsafe {
+        let foreground_hwnd = GetForegroundWindow();
+        let mut foreground_pid = 0;
+        GetWindowThreadProcessId(foreground_hwnd, Some(&mut foreground_pid));
+        pid == foreground_pid
+    }
+}
+
+pub fn track_visible_apps() {
+    init_db();
+    std::thread::spawn(|| loop {
+        update_visible_apps_db();
+        std::thread::sleep(std::time::Duration::from_secs(1)); // Auto-update every second
+    });
 }
