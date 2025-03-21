@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
 use std::sync::Mutex;
-use chrono::{Utc, Duration};
+use chrono::Utc;
 use serde::{Serialize, Deserialize};
 
 lazy_static::lazy_static! {

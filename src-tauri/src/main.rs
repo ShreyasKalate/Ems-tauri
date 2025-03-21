@@ -3,7 +3,7 @@
 mod commands;
 use commands::{
     system::{get_ram_usage, track_ram_usage},
-    installed_apps::get_installed_apps,
+    installed_apps::store_installed_apps_to_db,
     browser::get_browser_history,
     visible_apps::track_visible_apps,
     running_apps::get_running_apps,
@@ -18,6 +18,7 @@ fn main() {
     track_ram_usage();
     start_afk_tracker();
     track_visible_apps();
+    store_installed_apps_to_db();
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
 
@@ -34,7 +35,6 @@ fn main() {
             get_afk_status,
             get_running_apps,
             get_ram_usage,
-            get_installed_apps,
             get_browser_history,
             get_capture_screen,
             list_usb_devices,
