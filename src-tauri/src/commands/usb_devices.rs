@@ -1,3 +1,4 @@
+use crate::commands::database::execute_write_query;
 use rusb::{Context, Device, DeviceDescriptor, UsbContext};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -7,6 +8,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 use tauri::command;
+use rusqlite::Result;
 
 /// Struct for storing USB device information
 #[derive(Serialize)]
@@ -28,7 +30,45 @@ pub struct FileEntry {
     files: Option<Vec<FileEntry>>, // Nested files if it's a directory
 }
 
-/// Gets a list of all connected USB devices and returns as JSON.
+/// **Creates the USB devices table if it doesn't exist**
+pub fn init_usb_table() -> Result<()> {
+    let create_table_query = "
+        CREATE TABLE IF NOT EXISTS usb_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vendor_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            manufacturer TEXT,
+            product TEXT,
+            is_storage BOOLEAN NOT NULL,
+            mount_path TEXT,
+            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    ";
+    execute_write_query(create_table_query, &[])?;
+    Ok(())
+}
+
+/// **Inserts a new USB device record into the database**
+pub fn insert_usb_device(device: &UsbDevice) -> Result<()> {
+    let insert_query = "
+        INSERT INTO usb_devices (vendor_id, product_id, manufacturer, product, is_storage, mount_path) 
+        VALUES (?, ?, ?, ?, ?, ?);
+    ";
+    execute_write_query(
+        insert_query,
+        &[
+            &device.vendor_id,
+            &device.product_id,
+            &device.manufacturer,
+            &device.product,
+            &device.is_storage,
+            &device.mount_path,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Gets a list of all connected USB devices and stores them in the database.
 #[command]
 pub fn list_usb_devices() -> Result<Vec<UsbDevice>, String> {
     let context = Context::new().map_err(|e| e.to_string())?;
@@ -36,6 +76,8 @@ pub fn list_usb_devices() -> Result<Vec<UsbDevice>, String> {
 
     for device in context.devices().map_err(|e| e.to_string())?.iter() {
         if let Ok(usb_device) = get_device_info(&device) {
+            // Store in the database
+            let _ = insert_usb_device(&usb_device);
             devices_list.push(usb_device);
         }
     }
@@ -157,7 +199,6 @@ fn list_files_recursive(path: &str) -> Result<Vec<FileEntry>, String> {
         }
     }
 
-    // Sort folders first, then files, both alphabetically
     entries.sort_by(|a, b| {
         if a.is_dir == b.is_dir {
             a.name.to_lowercase().cmp(&b.name.to_lowercase())

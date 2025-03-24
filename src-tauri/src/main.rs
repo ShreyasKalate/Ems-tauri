@@ -8,7 +8,7 @@ use commands::{
     visible_apps::track_visible_apps,
     running_apps::get_running_apps,
     capture_screen::{get_capture_screen, start_screenshot_scheduler},
-    usb_devices::list_usb_devices,
+    usb_devices::{list_usb_devices, init_usb_table},
     usb_monitor::monitor_usb_file_transfers,
     afk_tracker::{start_afk_tracker, get_afk_status},
 };
@@ -42,6 +42,7 @@ fn main() {
         ])
         .setup(|_app| {
             println!("Tauri app is running...");
+            init_usb_table().expect("Failed to initialize USB database table"); // ✅ Call the function
             Ok(())
         })
         .run(tauri::generate_context!())

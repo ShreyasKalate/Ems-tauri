@@ -79,10 +79,6 @@ pub fn update_visible_apps_db() {
             params![app.pid, app.name, app.window_title, is_topmost_window(app.pid)],
         ).expect("Failed to insert/update visible app");
 
-        println!(
-            "Tracking: PID={} Name={} Title={} Session={} Total={} Top={} Time={}",
-            app.pid, app.name, app.window_title, 1, 1, is_topmost_window(app.pid) as i64, now
-        );
     }
 }
 
