@@ -1,18 +1,13 @@
-use rusqlite::{params, Connection};
+use crate::commands::database::execute_write_query;
 use chrono::{DateTime, Duration as ChronoDuration, Local};
 use device_query::{DeviceQuery, DeviceState};
+use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::command;
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
-
-lazy_static::lazy_static! {
-    static ref DB_CONN: Mutex<Connection> = Mutex::new(
-        Connection::open("ems_data.db").expect("Failed to open database")
-    );
-}
 
 #[derive(Debug)]
 struct AfkState {
@@ -22,7 +17,7 @@ struct AfkState {
     curr_afk_session: ChronoDuration,
     last_mouse_pos: (i32, i32),
     is_afk: bool,
-    current_afk_id: Option<i64>,  // Store the current AFK session's DB ID
+    current_afk_id: Option<i64>,
 }
 
 impl AfkState {
@@ -39,40 +34,24 @@ impl AfkState {
     }
 }
 
-fn get_idle_time() -> Duration {
-    unsafe {
-        let mut lii = LASTINPUTINFO {
-            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
-            dwTime: 0,
-        };
+static AFK_STATE: Lazy<Arc<Mutex<AfkState>>> = Lazy::new(|| Arc::new(Mutex::new(AfkState::new())));
 
-        if GetLastInputInfo(&mut lii).as_bool() {
-            let uptime = GetTickCount64();
-            let idle_time = uptime - lii.dwTime as u64;
-            Duration::from_millis(idle_time)
-        } else {
-            Duration::from_secs(0)
-        }
-    }
-}
-
-static AFK_STATE: once_cell::sync::Lazy<Arc<Mutex<AfkState>>> =
-    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(AfkState::new())));
-
+/// **Initializes the AFK tracking table**
 pub fn init_afk_db() {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS afk_tracking (
+    let create_table_query = "
+        CREATE TABLE IF NOT EXISTS afk_tracking (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             curr_afk_session INTEGER,  
             last_active TIMESTAMP,     
             total_afk_duration INTEGER, 
-            afk_start TIMESTAMP        
-        )",
-        [],
-    ).expect("Failed to create afk_tracking table");
+            afk_start TIMESTAMP
+        );
+    ";
+    
+
 }
 
+/// **Starts the AFK tracker**
 pub fn start_afk_tracker() {
     println!("🔥 Starting AFK Tracker...");
 
@@ -92,10 +71,9 @@ pub fn start_afk_tracker() {
             let mut state = afk_state.lock().unwrap();
             let new_mouse_pos = (mouse.coords.0, mouse.coords.1);
 
-            let has_user_activity = 
-                !keys.is_empty() || 
-                new_mouse_pos != state.last_mouse_pos ||  
-                mouse.button_pressed.iter().any(|&b| b); 
+            let has_user_activity = !keys.is_empty()
+                || new_mouse_pos != state.last_mouse_pos
+                || mouse.button_pressed.iter().any(|&b| b);
 
             if has_user_activity {
                 if state.is_afk {
@@ -123,7 +101,12 @@ pub fn start_afk_tracker() {
                     state.is_afk = true;
                     println!("🚨 AFK Started at {}", now);
 
-                    state.current_afk_id = insert_afk_session(0, now);
+                    state.current_afk_id = insert_afk_session(
+                        state.curr_afk_session.num_seconds(),  // Store correct AFK session duration
+                        state.total_afk_duration.num_seconds(),  // Store correct total AFK duration
+                        now
+                    );
+                    
                 } else if let Some(afk_id) = state.current_afk_id {
                     state.curr_afk_session = now.signed_duration_since(state.afk_start.unwrap());
 
@@ -147,42 +130,59 @@ pub fn start_afk_tracker() {
 }
 
 /// **Inserts a new AFK session when AFK starts**
-fn insert_afk_session(curr_afk: i64, afk_start: DateTime<Local>) -> Option<i64> {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "INSERT INTO afk_tracking (curr_afk_session, last_active, total_afk_duration, afk_start) 
-         VALUES (?1, datetime('now'), 0, ?2)",
-        params![
-            curr_afk,
-            afk_start.format("%Y-%m-%d %H:%M:%S").to_string()
+fn insert_afk_session(curr_afk: i64, total_afk: i64, afk_start: DateTime<Local>) -> Option<i64> {
+    let query = "
+        INSERT INTO afk_tracking (curr_afk_session, last_active, total_afk_duration, afk_start) 
+        VALUES (?, ?, ?, ?);
+    ";
+
+    let afk_start_str = afk_start.format("%Y-%m-%d %H:%M:%S").to_string();
+    let last_active_str = afk_start_str.clone(); // Initially same as afk_start
+
+    match execute_write_query(
+        query,
+        vec![
+            Box::new(curr_afk),        // Correct AFK session time
+            Box::new(last_active_str), // Last active timestamp
+            Box::new(total_afk),       // Correct total AFK duration
+            Box::new(afk_start_str),   // AFK start timestamp
         ],
-    ).expect("Failed to insert AFK session");
-
-    conn.last_insert_rowid().into()
+    ) {
+        Ok(id) => Some(id),
+        Err(err) => {
+            eprintln!("❌ Failed to insert AFK session: {:?}", err);
+            None
+        }
+    }
 }
 
-/// **Updates `curr_afk_session` for an ongoing AFK session**
+
 fn update_afk_session(afk_id: i64, curr_afk: i64) {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "UPDATE afk_tracking 
-         SET curr_afk_session = ?1 
-         WHERE id = ?2",
-        params![curr_afk, afk_id],
-    ).expect("Failed to update AFK session");
+    let query = "
+        UPDATE afk_tracking 
+        SET curr_afk_session = ? 
+        WHERE id = ?;
+    ";
+
+    if let Err(e) = execute_write_query(query, vec![Box::new(curr_afk), Box::new(afk_id)]) {
+        eprintln!("Error updating AFK session: {:?}", e);
+    }
 }
 
-/// **Finalizes AFK session when user becomes active**
 fn finalize_afk_session(afk_id: i64, total_afk: i64) {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "UPDATE afk_tracking 
-         SET total_afk_duration = ?1 
-         WHERE id = ?2",
-        params![total_afk, afk_id],
-    ).expect("Failed to finalize AFK session");
+    let query = "
+        UPDATE afk_tracking 
+        SET total_afk_duration = ? 
+        WHERE id = ?;
+    ";
+
+    if let Err(e) = execute_write_query(query, vec![Box::new(total_afk), Box::new(afk_id)]) {
+        eprintln!("Error finalizing AFK session: {:?}", e);
+    }
 }
 
+
+/// **Gets AFK status**
 #[command]
 pub fn get_afk_status() -> String {
     let state = AFK_STATE.lock().unwrap();
@@ -196,4 +196,22 @@ pub fn get_afk_status() -> String {
     );
     println!("{}", afk_data);
     afk_data
+}
+
+/// **Gets system idle time**
+fn get_idle_time() -> Duration {
+    unsafe {
+        let mut lii = LASTINPUTINFO {
+            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+
+        if GetLastInputInfo(&mut lii).as_bool() {
+            let uptime = GetTickCount64();
+            let idle_time = uptime - lii.dwTime as u64;
+            Duration::from_millis(idle_time)
+        } else {
+            Duration::from_secs(0)
+        }
+    }
 }

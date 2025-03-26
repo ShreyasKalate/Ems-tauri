@@ -13,12 +13,14 @@ use commands::{
     afk_tracker::{start_afk_tracker, get_afk_status},
 };
 use tokio::runtime::Runtime;
-
+use std::thread;
 fn main() {
     track_ram_usage();
     start_afk_tracker();
     track_visible_apps();
-    store_installed_apps_to_db();
+    thread::spawn(|| {
+        store_installed_apps_to_db();
+    });
 
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
 

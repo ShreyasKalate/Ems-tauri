@@ -1,15 +1,10 @@
-use rusqlite::{params, Connection};
+use crate::commands::database::execute_write_query;
+use rusqlite::ToSql;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
-use std::sync::Mutex;
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
-
-lazy_static::lazy_static! {
-    static ref DB_CONN: Mutex<Connection> = Mutex::new(
-        Connection::open("ems_data.db").expect("Failed to open database")
-    );
-}
+use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize)]
 struct VisibleApp {
@@ -21,10 +16,9 @@ struct VisibleApp {
     top_usage: i64,
 }
 
-pub fn init_db() {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS visible_apps (
+pub fn init_visible_apps_db() {
+    let create_table_query = "
+        CREATE TABLE IF NOT EXISTS visible_apps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pid INTEGER,
             name TEXT,
@@ -34,9 +28,9 @@ pub fn init_db() {
             top_usage INTEGER, 
             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(pid, name, window_title)
-        )",
-        [],
-    ).expect("Failed to create visible_apps table");
+        );
+    ";
+    execute_write_query(create_table_query, vec![]).expect("Failed to create visible_apps table");
 }
 
 unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -62,23 +56,32 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 }
 
 pub fn update_visible_apps_db() {
-    let conn = DB_CONN.lock().unwrap();
     let mut visible_apps: Vec<VisibleApp> = Vec::new();
     unsafe { EnumWindows(Some(enum_window_proc), LPARAM(&mut visible_apps as *mut _ as isize)); }
 
     let now = Utc::now().timestamp();
-    for app in visible_apps {
-        conn.execute(
-            "INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
-             VALUES (?1, ?2, ?3, 0, 0, 0, CURRENT_TIMESTAMP) 
-             ON CONFLICT(pid, name, window_title) DO UPDATE 
-             SET curr_session = curr_session + 1, 
-                 total_usage = total_usage + 1, 
-                 top_usage = CASE WHEN ?4 THEN top_usage + 1 ELSE top_usage END, 
-                 last_seen = CURRENT_TIMESTAMP",
-            params![app.pid, app.name, app.window_title, is_topmost_window(app.pid)],
-        ).expect("Failed to insert/update visible app");
 
+    for app in visible_apps {
+        let query: &str = "
+            INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
+            VALUES (?, ?, ?, 0, 0, 0, CURRENT_TIMESTAMP) 
+            ON CONFLICT(pid, name, window_title) DO UPDATE 
+            SET curr_session = curr_session + 1, 
+                total_usage = total_usage + 1, 
+                top_usage = CASE WHEN ? THEN top_usage + 1 ELSE top_usage END, 
+                last_seen = CURRENT_TIMESTAMP;
+        ";
+
+        let params: Vec<Box<dyn ToSql + Send + Sync>> = vec![
+            Box::new(app.pid),
+            Box::new(app.name.clone()),
+            Box::new(app.window_title.clone()),
+            Box::new(is_topmost_window(app.pid)),
+        ];
+
+        if let Err(err) = execute_write_query(query, params) {
+            eprintln!("❌ Failed to insert/update visible app: {}", err);
+        }
     }
 }
 
@@ -93,7 +96,7 @@ fn is_topmost_window(pid: u32) -> bool {
 }
 
 pub fn track_visible_apps() {
-    init_db();
+    init_visible_apps_db();
     std::thread::spawn(|| loop {
         update_visible_apps_db();
         std::thread::sleep(std::time::Duration::from_secs(1)); // Auto-update every second

@@ -1,5 +1,6 @@
-use rusqlite::{params, Connection};
-use serde::{Serialize, Deserialize};
+use crate::commands::database::{execute_write_query, execute_read_query}; 
+use rusqlite::ToSql;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::process::Command;
 use std::time::SystemTime;
@@ -17,6 +18,7 @@ pub struct InstalledApp {
     source: String, // "system" or "user-shail"
 }
 
+/// Formats date from `yyyymmdd` to `yyyy-mm-dd`
 fn format_date(date: &str) -> String {
     if date.len() == 8 {
         format!("{}-{}-{}", &date[6..], &date[4..6], &date[0..4])
@@ -25,6 +27,7 @@ fn format_date(date: &str) -> String {
     }
 }
 
+/// Gets MSI-installed apps using `wmic`
 fn get_msi_installed_apps() -> Vec<(String, String)> {
     let output = Command::new("wmic")
         .args(["product", "get", "IdentifyingNumber,Name"])
@@ -35,15 +38,12 @@ fn get_msi_installed_apps() -> Vec<(String, String)> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut apps = Vec::new();
 
-        let lines: Vec<&str> = stdout.lines().collect();
-        if lines.len() > 1 {
-            for line in lines.iter().skip(1) {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let identifying_number = parts[0].to_string();
-                    let name = parts[1..].join(" ");
-                    apps.push((name, identifying_number));
-                }
+        for line in stdout.lines().skip(1) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let identifying_number = parts[0].to_string();
+                let name = parts[1..].join(" ");
+                apps.push((name, identifying_number));
             }
         }
         return apps;
@@ -51,7 +51,13 @@ fn get_msi_installed_apps() -> Vec<(String, String)> {
     vec![]
 }
 
-fn extract_from_registry(key: &RegKey, app_list: &mut Vec<InstalledApp>, source: &str, msi_apps: &[(String, String)]) {
+/// Extracts installed applications from registry
+fn extract_from_registry(
+    key: &RegKey,
+    app_list: &mut Vec<InstalledApp>,
+    source: &str,
+    msi_apps: &[(String, String)],
+) {
     for subkey_name in key.enum_keys().filter_map(Result::ok) {
         if let Ok(subkey) = key.open_subkey(&subkey_name) {
             let name = subkey.get_value::<String, _>("DisplayName").unwrap_or_default();
@@ -65,13 +71,17 @@ fn extract_from_registry(key: &RegKey, app_list: &mut Vec<InstalledApp>, source:
                 .map(|(_, id)| id.clone())
                 .unwrap_or("N/A".to_string());
 
-            let install_date = subkey.get_value::<String, _>("InstallDate")
+            let install_date = subkey
+                .get_value::<String, _>("InstallDate")
                 .map(|d| format_date(&d))
                 .unwrap_or("N/A".to_string());
 
-            let install_location = subkey.get_value::<String, _>("InstallLocation").unwrap_or("N/A".to_string());
+            let install_location =
+                subkey.get_value::<String, _>("InstallLocation").unwrap_or("N/A".to_string());
             let vendor = subkey.get_value::<String, _>("Publisher").unwrap_or("Unknown".to_string());
-            let version = subkey.get_value::<String, _>("DisplayVersion").unwrap_or("Unknown".to_string());
+            let version = subkey
+                .get_value::<String, _>("DisplayVersion")
+                .unwrap_or("Unknown".to_string());
 
             app_list.push(InstalledApp {
                 identifying_number,
@@ -80,16 +90,17 @@ fn extract_from_registry(key: &RegKey, app_list: &mut Vec<InstalledApp>, source:
                 name: name.trim().to_string(),
                 vendor,
                 version: version.trim().to_string(),
-                source: source.trim().to_string(),            
+                source: source.trim().to_string(),
             });
         }
     }
 }
 
+/// Stores installed applications in SQLite database
 pub fn store_installed_apps_to_db() {
-    let conn = Connection::open("ems_data.db").expect("Failed to open database");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS installed_apps (
+    // ✅ Create the table if not exists
+    let create_table_query = "
+        CREATE TABLE IF NOT EXISTS installed_apps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             identifying_number TEXT,
@@ -101,72 +112,88 @@ pub fn store_installed_apps_to_db() {
             scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_deleted BOOLEAN DEFAULT FALSE,
             UNIQUE(name, version, source)
-        )",
-        [],
-    ).unwrap();
+        )";
+    execute_write_query(create_table_query, vec![]).expect("Failed to create installed_apps table");
 
     let msi_apps = get_msi_installed_apps();
     let mut all_apps: Vec<InstalledApp> = Vec::new();
 
-    if let Ok(hklm) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall") {
+    // ✅ Read installed apps from SYSTEM registry
+    if let Ok(hklm) = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
+    {
         extract_from_registry(&hklm, &mut all_apps, "system", &msi_apps);
     }
 
-    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall") {
+    // ✅ Read installed apps from USER registry
+    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
+    {
         extract_from_registry(&hkcu, &mut all_apps, "user-shail", &msi_apps);
     }
 
-    let now = SystemTime::now();
     let mut seen_keys = HashSet::new();
 
+    // ✅ Insert or update installed applications
     for app in &all_apps {
         let key = format!("{}|{}|{}", app.name, app.version, app.source);
         seen_keys.insert(key.clone());
 
-        conn.execute(
-            "INSERT INTO installed_apps (name, identifying_number, install_date, install_location, vendor, version, source, scanned_at, is_deleted)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP, FALSE)
-             ON CONFLICT(name, version, source) DO UPDATE SET 
-                 identifying_number=excluded.identifying_number,
-                 install_date=excluded.install_date,
-                 install_location=excluded.install_location,
-                 vendor=excluded.vendor,
-                 scanned_at=CURRENT_TIMESTAMP,
-                 is_deleted=FALSE",
-            params![
-                app.name,
-                app.identifying_number,
-                app.install_date,
-                app.install_location,
-                app.vendor,
-                app.version,
-                app.source,
-            ],
-        ).unwrap();
+        let insert_query = "
+            INSERT INTO installed_apps 
+            (name, identifying_number, install_date, install_location, vendor, version, source, scanned_at, is_deleted) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, FALSE) 
+            ON CONFLICT(name, version, source) 
+            DO UPDATE SET 
+                identifying_number = excluded.identifying_number,
+                install_date = excluded.install_date,
+                install_location = excluded.install_location,
+                vendor = excluded.vendor,
+                scanned_at = CURRENT_TIMESTAMP,
+                is_deleted = FALSE";
+
+        let params: Vec<Box<dyn ToSql + Send + Sync>> = vec![
+            Box::new(app.name.clone()),
+            Box::new(app.identifying_number.clone()),
+            Box::new(app.install_date.clone()),
+            Box::new(app.install_location.clone()),
+            Box::new(app.vendor.clone()),
+            Box::new(app.version.clone()),
+            Box::new(app.source.clone()),
+        ];
+
+        if let Err(err) = execute_write_query(insert_query, params) {
+            eprintln!("❌ Failed to insert/update installed app: {}", err);
+        }
     }
 
-    // Mark missing apps as deleted
-    let mut stmt = conn
-        .prepare("SELECT name, version, source FROM installed_apps WHERE is_deleted = FALSE")
-        .unwrap();
+    // ✅ Mark missing apps as deleted
+    let select_query = "SELECT name, version, source FROM installed_apps WHERE is_deleted = FALSE";
+let db_apps: Vec<(String, String, String)> = match execute_read_query(
+    select_query, 
+    vec![], 
+    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+) {
+    Ok(rows) => rows,
+    Err(err) => {
+        eprintln!("❌ Failed to query installed apps: {}", err);
+        Vec::new()
+    }
+};
 
-    let db_apps = stmt
-        .query_map([], |row| {
-            let name: String = row.get(0)?;
-            let version: String = row.get(1)?;
-            let source: String = row.get(2)?;
-            Ok((name, version, source))
-        })
-        .unwrap();
 
-    for entry in db_apps.flatten() {
-        let key = format!("{}|{}|{}", entry.0, entry.1, entry.2);
+    for (name, version, source) in db_apps {
+        let key = format!("{}|{}|{}", name, version, source);
         if !seen_keys.contains(&key) {
-            conn.execute(
-                "UPDATE installed_apps SET is_deleted = TRUE WHERE name = ?1 AND version = ?2 AND source = ?3",
-                params![entry.0, entry.1, entry.2],
-            ).unwrap();
-            println!("❌ App removed: {} v{} ({})", entry.0, entry.1, entry.2);
+            let update_query = "UPDATE installed_apps SET is_deleted = TRUE WHERE name = ? AND version = ? AND source = ?";
+            let params: Vec<Box<dyn ToSql + Send + Sync>> =
+                vec![Box::new(name.clone()), Box::new(version.clone()), Box::new(source.clone())];
+
+            if let Err(err) = execute_write_query(update_query, params) {
+                eprintln!("❌ Failed to mark app as deleted: {}", err);
+            } else {
+                println!("❌ App removed: {} v{} ({})", name, version, source);
+            }
         }
     }
 

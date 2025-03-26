@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 ems_data.db
+ems_data.db-shm
+ems_data.db-wal

@@ -8,7 +8,6 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 use tauri::command;
-use rusqlite::Result;
 
 /// Struct for storing USB device information
 #[derive(Serialize)]
@@ -31,7 +30,7 @@ pub struct FileEntry {
 }
 
 /// **Creates the USB devices table if it doesn't exist**
-pub fn init_usb_table() -> Result<()> {
+pub fn init_usb_table() -> Result<(), rusqlite::Error> {
     let create_table_query = "
         CREATE TABLE IF NOT EXISTS usb_devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,48 +43,54 @@ pub fn init_usb_table() -> Result<()> {
             inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     ";
-    execute_write_query(create_table_query, &[])?;
+
+    if let Err(err) = execute_write_query(create_table_query, vec![]) {
+        eprintln!("❌ Failed to create usb_devices table: {}", err);
+    }
+
     Ok(())
 }
 
 /// **Inserts a new USB device record into the database**
-pub fn insert_usb_device(device: &UsbDevice) -> Result<()> {
-    let insert_query = "
-        INSERT INTO usb_devices (vendor_id, product_id, manufacturer, product, is_storage, mount_path) 
-        VALUES (?, ?, ?, ?, ?, ?);
-    ";
-    execute_write_query(
-        insert_query,
-        &[
-            &device.vendor_id,
-            &device.product_id,
-            &device.manufacturer,
-            &device.product,
-            &device.is_storage,
-            &device.mount_path,
+pub fn insert_usb_device(device: &UsbDevice) {
+    let result = execute_write_query(
+        "INSERT INTO usb_devices (vendor_id, product_id, manufacturer, product, is_storage, mount_path) VALUES (?, ?, ?, ?, ?, ?);",
+        vec![
+            Box::new(device.vendor_id),
+            Box::new(device.product_id),
+            Box::new(device.manufacturer.clone().unwrap_or_else(|| "".to_string())),
+            Box::new(device.product.clone().unwrap_or_else(|| "".to_string())),
+            Box::new(device.is_storage),
+            Box::new(device.mount_path.clone().unwrap_or_else(|| "".to_string())),
         ],
-    )?;
-    Ok(())
+    );
+
+    if let Err(err) = result {
+        eprintln!("❌ Failed to insert USB device: {} (Vendor ID: {}, Product ID: {})", err, device.vendor_id, device.product_id);
+    } else {
+        println!("✅ USB device inserted successfully (Vendor ID: {}, Product ID: {})", device.vendor_id, device.product_id);
+    }
 }
 
-/// Gets a list of all connected USB devices and stores them in the database.
+
+/// **Gets a list of all connected USB devices and stores them in the database**
+/// 
 #[command]
-pub fn list_usb_devices() -> Result<Vec<UsbDevice>, String> {
-    let context = Context::new().map_err(|e| e.to_string())?;
+pub fn list_usb_devices() -> Vec<UsbDevice> {
+    let context = Context::new().unwrap();
     let mut devices_list = Vec::new();
 
-    for device in context.devices().map_err(|e| e.to_string())?.iter() {
+    for device in context.devices().unwrap().iter() {
         if let Ok(usb_device) = get_device_info(&device) {
-            // Store in the database
-            let _ = insert_usb_device(&usb_device);
+            insert_usb_device(&usb_device); // Store in DB
             devices_list.push(usb_device);
         }
     }
 
-    Ok(devices_list)
+    devices_list
 }
 
-/// Extracts detailed info from a USB device.
+/// **Extracts detailed info from a USB device**
 pub fn get_device_info<T: UsbContext>(device: &Device<T>) -> Result<UsbDevice, String> {
     let descriptor: DeviceDescriptor = device.device_descriptor().map_err(|e| e.to_string())?;
     let mut manufacturer = None;
@@ -114,10 +119,10 @@ pub fn get_device_info<T: UsbContext>(device: &Device<T>) -> Result<UsbDevice, S
     if is_storage {
         if let Some(mount) = get_mount_path() {
             mount_path = Some(mount.clone());
-            files = Some(list_files_recursive(&mount)?);
+            files = list_files_recursive(&mount).ok();
         } else if let Some(mount) = get_dynamic_usb_mount() {
             mount_path = Some(mount.clone());
-            files = Some(list_files_recursive(&mount)?);
+            files = list_files_recursive(&mount).ok();
         }
     }
 
@@ -146,7 +151,7 @@ fn is_usb_storage_device<T: UsbContext>(device: &Device<T>) -> bool {
     false
 }
 
-/// Detects the USB mount path dynamically
+/// **Detects the USB mount path dynamically**
 fn get_dynamic_usb_mount() -> Option<String> {
     let initial_drives = get_available_drives();
     thread::sleep(Duration::from_secs(3));
@@ -159,7 +164,7 @@ fn get_dynamic_usb_mount() -> Option<String> {
     None
 }
 
-/// Get a list of available drive letters
+/// **Get a list of available drive letters**
 fn get_available_drives() -> HashSet<String> {
     let mut drives = HashSet::new();
 
@@ -173,7 +178,7 @@ fn get_available_drives() -> HashSet<String> {
     drives
 }
 
-/// Recursively fetches files inside folders and sorts them alphabetically
+/// **Recursively fetches files inside folders and sorts them alphabetically**
 fn list_files_recursive(path: &str) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
 
@@ -212,7 +217,7 @@ fn list_files_recursive(path: &str) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
-/// Detects the USB mount path (Windows)
+/// **Detects the USB mount path (Windows)**
 fn get_mount_path() -> Option<String> {
     let output = Command::new("wmic")
         .args(&["logicaldisk", "where", "DriveType=2", "get", "DeviceID"])
