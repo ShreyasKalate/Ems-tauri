@@ -87,7 +87,7 @@ fn extract_from_registry(key: &RegKey, app_list: &mut Vec<InstalledApp>, source:
 }
 
 pub fn store_installed_apps_to_db() {
-    let conn = Connection::open("ems_data.db").expect("Failed to open database");
+    let conn = Connection::open("ems_data_installed.db").expect("Failed to open database");
     conn.execute(
         "CREATE TABLE IF NOT EXISTS installed_apps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

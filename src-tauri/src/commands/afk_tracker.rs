@@ -10,7 +10,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINF
 
 lazy_static::lazy_static! {
     static ref DB_CONN: Mutex<Connection> = Mutex::new(
-        Connection::open("ems_data.db").expect("Failed to open database")
+        Connection::open("ems_data_afk.db").expect("Failed to open database")
     );
 }
 

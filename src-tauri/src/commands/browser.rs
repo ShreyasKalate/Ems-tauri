@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::Connection;
 use serde::{Serialize, Deserialize};
 use std::env;
 use std::fs;

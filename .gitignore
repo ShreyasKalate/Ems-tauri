@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 ems_data.db
+ems_data_afk.db
+ems_data_installed.db
+ems_data_visible.db

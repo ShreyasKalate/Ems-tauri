@@ -7,7 +7,7 @@ use serde::{Serialize, Deserialize};
 
 lazy_static::lazy_static! {
     static ref DB_CONN: Mutex<Connection> = Mutex::new(
-        Connection::open("ems_data.db").expect("Failed to open database")
+        Connection::open("ems_data_visible.db").expect("Failed to open database")
     );
 }
 
@@ -78,11 +78,6 @@ pub fn update_visible_apps_db() {
                  last_seen = CURRENT_TIMESTAMP",
             params![app.pid, app.name, app.window_title, is_topmost_window(app.pid)],
         ).expect("Failed to insert/update visible app");
-
-        println!(
-            "Tracking: PID={} Name={} Title={} Session={} Total={} Top={} Time={}",
-            app.pid, app.name, app.window_title, 1, 1, is_topmost_window(app.pid) as i64, now
-        );
     }
 }
 

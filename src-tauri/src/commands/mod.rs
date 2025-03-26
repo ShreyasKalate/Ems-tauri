@@ -7,3 +7,4 @@ pub mod capture_screen;
 pub mod usb_devices;
 pub mod usb_monitor;
 pub mod afk_tracker;
+pub mod database;
