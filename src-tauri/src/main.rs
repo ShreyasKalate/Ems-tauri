@@ -6,7 +6,7 @@ mod commands;
 
 use commands::database::{create_tables, start_db_operations, clean_exit};
 use commands::{
-    system::track_ram_usage,
+    system::track_system_usage,
     installed_apps::store_installed_apps_to_db,
     browser::get_browser_history,
     visible_apps::track_visible_apps,
@@ -19,19 +19,19 @@ use commands::{
 use tokio::runtime::Runtime;
 
 fn main() {
-    // 🧠 Start RAM tracker (cache-only)
-    thread::spawn(track_ram_usage);
+    // Start RAM tracker (cache-only)
+    thread::spawn(track_system_usage);
     start_afk_tracker();
     track_visible_apps();
     store_installed_apps_to_db();
 
-    // 🛠️ Initialize DB schema
+    // Initialize DB schema
     create_tables();
 
-    // 🔁 Start background DB sync loop
+    // Start background DB sync loop
     thread::spawn(start_db_operations);
 
-    // 🧵 Start async services
+    // Start async services
     let runtime = Runtime::new().expect("Failed to create Tokio runtime");
 
     runtime.spawn(async {

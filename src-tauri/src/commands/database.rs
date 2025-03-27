@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use once_cell::sync::Lazy;
-use std::{sync::Mutex, time::Duration, thread};
+use std::sync::Mutex;
 
 use crate::commands::system;
 
@@ -11,13 +11,14 @@ pub static DB_CONN: Lazy<Mutex<Connection>> = Lazy::new(|| {
 
 /// Step 1: Create all tables
 pub fn create_tables() {
-    system::create_ram_usage_table();
+    system::create_system_table();
 }
 
 /// Step 2: Start sync loop for all modules
+/// write from cache to SQLite
 pub fn start_db_operations() {
     loop {
-        system::ram_usage_db(); // write from cache to SQLite
+        system::system_db();
     }
 }
 

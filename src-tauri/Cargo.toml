@@ -22,7 +22,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sysinfo = "0.33"  # Add this line
+sysinfo = "0.33.1"
 winreg = "0.55"
 chrono = "0.4.39"
 chrono-tz = "0.10.1"

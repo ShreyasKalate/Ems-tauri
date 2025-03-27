@@ -1,67 +1,117 @@
-use sysinfo::System;
+use sysinfo::{System, Disks};
 use rusqlite::params;
 use std::{sync::Mutex, time::Duration, thread::sleep};
 
 use crate::commands::database::DB_CONN;
 
 lazy_static::lazy_static! {
-    static ref RAM_USAGE_CACHE: Mutex<Vec<f64>> = Mutex::new(Vec::new());
+    static ref SYSTEM_STATS_CACHE: Mutex<Vec<(f64, f64, f64, f32, f64, f64, f64)>> = Mutex::new(Vec::new());
 }
 
-/// Called from `database.rs`
-pub fn create_ram_usage_table() {
+/// Creates `system_stats` table, called from `database.rs`
+pub fn create_system_table() {
     let conn = DB_CONN.lock().unwrap_or_else(|e| e.into_inner());
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS ram_usage (
+        "CREATE TABLE IF NOT EXISTS system_stats (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            min_ram_gb REAL,
-            max_ram_gb REAL,
-            avg_ram_gb REAL,
+            used_ram_gb REAL,
             total_ram_gb REAL,
-            ram_usage_percent REAL
+            ram_usage_percent REAL,
+            cpu_usage_percent REAL,
+            used_disk_gb REAL,
+            total_disk_gb REAL,
+            disk_usage_percent REAL
         )",
         [],
-    ).expect("Failed to create ram_usage table");
+    ).expect("Failed to create system_stats table");
 }
 
-/// Called from `main.rs` directly in a thread
-pub fn track_ram_usage() {
+/// Called from `main.rs` — collects system-wide metrics every 5s
+pub fn track_system_usage() {
     loop {
         let mut sys = System::new_all();
-        sys.refresh_memory();
+        sys.refresh_all();
 
+        // RAM
         let used_ram = sys.used_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+        let total_ram = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+        let ram_percent = if total_ram > 0.0 {
+            (used_ram / total_ram) * 100.0
+        } else {
+            0.0
+        };
 
-        let mut cache = RAM_USAGE_CACHE.lock().unwrap();
-        if cache.len() >= 10 {
-            cache.remove(0);
+        // CPU
+        let cpu_percent = sys.global_cpu_usage();
+
+        // Disk — find primary (e.g. C:\ or /)
+        let disks = Disks::new_with_refreshed_list();
+        let mut used_disk = 0.0;
+        let mut total_disk = 0.0;
+
+        //windows specific
+        for disk in &disks {
+            let mount = disk.mount_point().to_string_lossy();
+            if cfg!(target_os = "windows") && mount.starts_with("C:") ||
+               cfg!(not(target_os = "windows")) && mount == "/" {
+                total_disk = disk.total_space() as f64 / 1e9;
+                let available = disk.available_space() as f64 / 1e9;
+                used_disk = total_disk - available;
+                break;
+            }
         }
-        cache.push(used_ram);
+
+        let disk_percent = if total_disk > 0.0 {
+            (used_disk / total_disk) * 100.0
+        } else {
+            0.0
+        };
+
+        {
+            let mut cache = SYSTEM_STATS_CACHE.lock().unwrap();
+            cache.push((
+                used_ram,
+                total_ram,
+                ram_percent,
+                cpu_percent,
+                used_disk,
+                total_disk,
+                disk_percent,
+            ));
+        }
 
         sleep(Duration::from_secs(5));
     }
 }
 
-/// Called from `database.rs`
-pub fn ram_usage_db() {
-    let mut cache = RAM_USAGE_CACHE.lock().unwrap();
-    if cache.len() < 10 {
+/// Called from `database.rs` — drains and stores system-wide stats
+pub fn system_db() {
+    let mut cache = SYSTEM_STATS_CACHE.lock().unwrap();
+    if cache.is_empty() {
         return;
     }
 
-    let min = *cache.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    let max = *cache.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    let avg = cache.iter().sum::<f64>() / cache.len() as f64;
-    let total = System::new_all().total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
-    let percent = (avg / total) * 100.0;
+    let rows: Vec<_> = cache.drain(..).collect();
+    drop(cache);
 
-    cache.clear();
+    let mut conn = DB_CONN.lock().unwrap_or_else(|e| e.into_inner());
+    let tx = conn.transaction().expect("❌ Failed to begin transaction");
 
-    let conn = DB_CONN.lock().unwrap_or_else(|e| e.into_inner());
-    conn.execute(
-        "INSERT INTO ram_usage (min_ram_gb, max_ram_gb, avg_ram_gb, total_ram_gb, ram_usage_percent)
-         VALUES (?, ?, ?, ?, ?)",
-        params![min, max, avg, total, percent],
-    ).expect("Failed to insert RAM data");
+    for (used_ram, total_ram, ram_percent, cpu_percent, used_disk, total_disk, disk_percent) in rows {
+        tx.execute(
+            "INSERT INTO system_stats (
+                used_ram_gb, total_ram_gb, ram_usage_percent,
+                cpu_usage_percent,
+                used_disk_gb, total_disk_gb, disk_usage_percent
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                used_ram, total_ram, ram_percent,
+                cpu_percent,
+                used_disk, total_disk, disk_percent
+            ],
+        ).expect("❌ Failed to insert system stat row");
+    }
+
+    tx.commit().expect("❌ Failed to commit transaction");
 }
