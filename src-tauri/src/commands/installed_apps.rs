@@ -15,10 +15,21 @@ pub struct InstalledApp {
     name: String,
     vendor: String,
     version: String,
-    source: String, // "system" or "user-shail"
+    source: String, // "system" or actual username
 }
 
-/// Formats date from `yyyymmdd` to `yyyy-mm-dd`
+/// **Gets the current username using `whoami`**
+fn get_current_user() -> String {
+    let output = Command::new("whoami").output();
+    if let Ok(output) = output {
+        if let Ok(username) = String::from_utf8(output.stdout) {
+            return username.trim().to_string();
+        }
+    }
+    "unknown-user".to_string()
+}
+
+/// **Formats date from `yyyymmdd` to `yyyy-mm-dd`**
 fn format_date(date: &str) -> String {
     if date.len() == 8 {
         format!("{}-{}-{}", &date[6..], &date[4..6], &date[0..4])
@@ -27,7 +38,7 @@ fn format_date(date: &str) -> String {
     }
 }
 
-/// Gets MSI-installed apps using `wmic`
+/// **Gets MSI-installed apps using `wmic`**
 fn get_msi_installed_apps() -> Vec<(String, String)> {
     let output = Command::new("wmic")
         .args(["product", "get", "IdentifyingNumber,Name"])
@@ -51,7 +62,7 @@ fn get_msi_installed_apps() -> Vec<(String, String)> {
     vec![]
 }
 
-/// Extracts installed applications from registry
+/// **Extracts installed applications from registry**
 fn extract_from_registry(
     key: &RegKey,
     app_list: &mut Vec<InstalledApp>,
@@ -96,8 +107,11 @@ fn extract_from_registry(
     }
 }
 
-/// Stores installed applications in SQLite database
+/// **Stores installed applications in SQLite database**
 pub fn store_installed_apps_to_db() {
+    // ✅ Get current user dynamically
+    let current_user = get_current_user();
+
     // ✅ Create the table if not exists
     let create_table_query = "
         CREATE TABLE IF NOT EXISTS installed_apps (
@@ -125,11 +139,11 @@ pub fn store_installed_apps_to_db() {
         extract_from_registry(&hklm, &mut all_apps, "system", &msi_apps);
     }
 
-    // ✅ Read installed apps from USER registry
+    // ✅ Read installed apps from USER registry (with actual username)
     if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall")
     {
-        extract_from_registry(&hkcu, &mut all_apps, "user-shail", &msi_apps);
+        extract_from_registry(&hkcu, &mut all_apps, &current_user, &msi_apps);
     }
 
     let mut seen_keys = HashSet::new();
@@ -169,18 +183,17 @@ pub fn store_installed_apps_to_db() {
 
     // ✅ Mark missing apps as deleted
     let select_query = "SELECT name, version, source FROM installed_apps WHERE is_deleted = FALSE";
-let db_apps: Vec<(String, String, String)> = match execute_read_query(
-    select_query, 
-    vec![], 
-    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-) {
-    Ok(rows) => rows,
-    Err(err) => {
-        eprintln!("❌ Failed to query installed apps: {}", err);
-        Vec::new()
-    }
-};
-
+    let db_apps: Vec<(String, String, String)> = match execute_read_query(
+        select_query, 
+        vec![], 
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ) {
+        Ok(rows) => rows,
+        Err(err) => {
+            eprintln!("❌ Failed to query installed apps: {}", err);
+            Vec::new()
+        }
+    };
 
     for (name, version, source) in db_apps {
         let key = format!("{}|{}|{}", name, version, source);

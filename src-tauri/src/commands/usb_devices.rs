@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -27,6 +28,34 @@ pub struct FileEntry {
     name: String,
     is_dir: bool,
     files: Option<Vec<FileEntry>>, // Nested files if it's a directory
+}
+
+/// Store detected USB devices to avoid duplicate insertions
+static DETECTED_USB_DEVICES: once_cell::sync::Lazy<Arc<Mutex<HashSet<(u16, u16)>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
+
+    /// **Initialize USB detection in a background thread**
+#[command]
+pub fn start_usb_monitor() {
+    thread::spawn(move || loop {
+        let context = Context::new().unwrap();
+        let devices = context.devices().unwrap();
+
+        let mut detected_devices = DETECTED_USB_DEVICES.lock().unwrap();
+
+        for device in devices.iter() {
+            if let Ok(usb_device) = get_device_info(&device) {
+                let device_key = (usb_device.vendor_id, usb_device.product_id);
+
+                if !detected_devices.contains(&device_key) {
+                    detected_devices.insert(device_key);
+                    insert_usb_device(&usb_device);
+                }
+            }
+        }
+
+        thread::sleep(Duration::from_secs(5)); // Check every 5 seconds
+    });
 }
 
 /// **Creates the USB devices table if it doesn't exist**
@@ -73,22 +102,22 @@ pub fn insert_usb_device(device: &UsbDevice) {
 }
 
 
-/// **Gets a list of all connected USB devices and stores them in the database**
-/// 
-#[command]
-pub fn list_usb_devices() -> Vec<UsbDevice> {
-    let context = Context::new().unwrap();
-    let mut devices_list = Vec::new();
+// // / **Gets a list of all connected USB devices and stores them in the database**
+// // / 
+// #[command]
+// pub fn list_usb_devices() -> Vec<UsbDevice> {
+//     let context = Context::new().unwrap();
+//     let mut devices_list = Vec::new();
 
-    for device in context.devices().unwrap().iter() {
-        if let Ok(usb_device) = get_device_info(&device) {
-            insert_usb_device(&usb_device); // Store in DB
-            devices_list.push(usb_device);
-        }
-    }
+//     for device in context.devices().unwrap().iter() {
+//         if let Ok(usb_device) = get_device_info(&device) {
+//             insert_usb_device(&usb_device); // Store in DB
+//             devices_list.push(usb_device);
+//         }
+//     }
 
-    devices_list
-}
+//     devices_list
+// }
 
 /// **Extracts detailed info from a USB device**
 pub fn get_device_info<T: UsbContext>(device: &Device<T>) -> Result<UsbDevice, String> {

@@ -47,9 +47,15 @@ pub fn init_afk_db() {
             afk_start TIMESTAMP
         );
     ";
-    
 
+    // Execute the query to create the table
+    if let Err(e) = execute_write_query(create_table_query, vec![]) {
+        eprintln!("❌ Failed to create afk_tracking table: {:?}", e);
+    } else {
+        println!("✅ afk_tracking table initialized successfully!");
+    }
 }
+
 
 /// **Starts the AFK tracker**
 pub fn start_afk_tracker() {
@@ -156,7 +162,6 @@ fn insert_afk_session(curr_afk: i64, total_afk: i64, afk_start: DateTime<Local>)
     }
 }
 
-
 fn update_afk_session(afk_id: i64, curr_afk: i64) {
     let query = "
         UPDATE afk_tracking 
@@ -180,7 +185,6 @@ fn finalize_afk_session(afk_id: i64, total_afk: i64) {
         eprintln!("Error finalizing AFK session: {:?}", e);
     }
 }
-
 
 /// **Gets AFK status**
 #[command]

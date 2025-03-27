@@ -4,7 +4,6 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
-use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize)]
 struct VisibleApp {
@@ -61,26 +60,29 @@ pub fn update_visible_apps_db() {
 
     let now = Utc::now().timestamp();
 
-    for app in visible_apps {
-        let query: &str = "
-            INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
-            VALUES (?, ?, ?, 0, 0, 0, CURRENT_TIMESTAMP) 
-            ON CONFLICT(pid, name, window_title) DO UPDATE 
-            SET curr_session = curr_session + 1, 
-                total_usage = total_usage + 1, 
-                top_usage = CASE WHEN ? THEN top_usage + 1 ELSE top_usage END, 
-                last_seen = CURRENT_TIMESTAMP;
-        ";
+    let query = "
+        INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) 
+        ON CONFLICT(pid, name, window_title) DO UPDATE 
+        SET curr_session = curr_session + 1, 
+            total_usage = total_usage + 1, 
+            top_usage = CASE WHEN ? THEN top_usage + 1 ELSE top_usage END, 
+            last_seen = CURRENT_TIMESTAMP;
+    ";
 
+    for app in visible_apps {
         let params: Vec<Box<dyn ToSql + Send + Sync>> = vec![
             Box::new(app.pid),
             Box::new(app.name.clone()),
             Box::new(app.window_title.clone()),
-            Box::new(is_topmost_window(app.pid)),
+            Box::new(0),  // curr_session starts at 0
+            Box::new(0),  // total_usage starts at 0
+            Box::new(0),  // top_usage starts at 0
+            Box::new(is_topmost_window(app.pid)), // Check if it's the topmost window
         ];
 
         if let Err(err) = execute_write_query(query, params) {
-            eprintln!("❌ Failed to insert/update visible app: {}", err);
+            eprintln!("❌ Failed to insert/update visible app {}: {}", app.name, err);
         }
     }
 }

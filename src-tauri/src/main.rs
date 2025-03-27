@@ -8,16 +8,18 @@ use commands::{
     visible_apps::track_visible_apps,
     running_apps::get_running_apps,
     capture_screen::{get_capture_screen, start_screenshot_scheduler},
-    usb_devices::{list_usb_devices, init_usb_table},
+    usb_devices::{start_usb_monitor, init_usb_table}, // ✅ USB functions
     usb_monitor::monitor_usb_file_transfers,
-    afk_tracker::{start_afk_tracker, get_afk_status},
+    afk_tracker::{start_afk_tracker, get_afk_status,init_afk_db},
 };
 use tokio::runtime::Runtime;
 use std::thread;
+
 fn main() {
     track_ram_usage();
     start_afk_tracker();
     track_visible_apps();
+    
     thread::spawn(|| {
         store_installed_apps_to_db();
     });
@@ -39,12 +41,15 @@ fn main() {
             get_ram_usage,
             get_browser_history,
             get_capture_screen,
-            list_usb_devices,
             monitor_usb_file_transfers,
         ])
         .setup(|_app| {
             println!("Tauri app is running...");
-            init_usb_table().expect("Failed to initialize USB database table"); // ✅ Call the function
+
+            init_usb_table();
+            init_afk_db(); // ✅ Create USB table if not exists
+            start_usb_monitor(); // ✅ Start monitoring USB devices automatically
+
             Ok(())
         })
         .run(tauri::generate_context!())
