@@ -3,7 +3,6 @@ use rusqlite::ToSql;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::process::Command;
-use std::time::SystemTime;
 use winreg::enums::*;
 use winreg::RegKey;
 
@@ -205,7 +204,7 @@ pub fn store_installed_apps_to_db() {
             if let Err(err) = execute_write_query(update_query, params) {
                 eprintln!("❌ Failed to mark app as deleted: {}", err);
             } else {
-                println!("❌ App removed: {} v{} ({})", name, version, source);
+                // println!("❌ App removed: {} v{} ({})", name, version, source);
             }
         }
     }

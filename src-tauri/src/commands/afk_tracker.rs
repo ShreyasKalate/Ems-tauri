@@ -116,11 +116,11 @@ pub fn start_afk_tracker() {
                 } else if let Some(afk_id) = state.current_afk_id {
                     state.curr_afk_session = now.signed_duration_since(state.afk_start.unwrap());
 
-                    println!(
-                        "⏳ Still AFK | Session: {}s | Total AFK: {}s",
-                        state.curr_afk_session.num_seconds(),
-                        state.total_afk_duration.num_seconds()
-                    );
+                    // println!(
+                    //     "⏳ Still AFK | Session: {}s | Total AFK: {}s",
+                    //     state.curr_afk_session.num_seconds(),
+                    //     state.total_afk_duration.num_seconds()
+                    // );
 
                     update_afk_session(afk_id, state.curr_afk_session.num_seconds());
                 }
@@ -198,7 +198,7 @@ pub fn get_afk_status() -> String {
         state.curr_afk_session.num_seconds(),
         state.total_afk_duration.num_seconds()
     );
-    println!("{}", afk_data);
+    // println!("{}", afk_data);
     afk_data
 }
 

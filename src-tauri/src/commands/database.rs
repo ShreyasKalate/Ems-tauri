@@ -1,11 +1,15 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use rusqlite::{Connection, Result, ToSql};
-use std::sync::{Arc, Mutex};
+use rusqlite::{Result, ToSql};
 use std::thread;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 
+// Create a connection pool using r2d2 and the SqliteConnectionManager
 lazy_static::lazy_static! {
-    static ref DB_CONN: Arc<Mutex<Connection>> =
-        Arc::new(Mutex::new(Connection::open("ems_data.db").expect("Failed to open database")));
+    static ref DB_POOL: Pool<SqliteConnectionManager> = {
+        let manager = SqliteConnectionManager::file("ems_data.db");
+        Pool::builder().max_size(10).build(manager).expect("Failed to create connection pool")
+    };
 }
 
 pub struct DbWriteRequest {
@@ -25,7 +29,9 @@ lazy_static::lazy_static! {
 /// **Starts a background thread for executing queued database writes**
 fn start_db_writer(receiver: Receiver<DbWriteRequest>) {
     thread::spawn(move || {
-        let conn = DB_CONN.lock().expect("Failed to lock database connection");
+        // Using the connection pool to get a connection
+        let conn = DB_POOL.get().expect("Failed to get DB connection");
+        println!("🧵 Thread {:?} using DB connection at {:p}", std::thread::current().id(), &*conn);
 
         // ✅ Enable WAL mode to prevent full database locks
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
@@ -38,7 +44,7 @@ fn start_db_writer(receiver: Receiver<DbWriteRequest>) {
                 .map(|p| p.as_ref() as &dyn ToSql)
                 .collect();
 
-            let mut retries = 5; // ✅ Retry up to 5 times if locked
+            let mut retries = 5; // Retry up to 5 times if locked
 
             while retries > 0 {
                 match conn.execute(&request.query, &param_refs[..]) {
@@ -60,13 +66,13 @@ fn start_db_writer(receiver: Receiver<DbWriteRequest>) {
                         if err.to_string().contains("database is locked") {
                             eprintln!("🔴 Database is locked. Retrying... ({}/5)", 6 - retries);
                             retries -= 1;
-                            std::thread::sleep(std::time::Duration::from_millis(50)); // ✅ Short delay before retry
+                            std::thread::sleep(std::time::Duration::from_millis(50)); // Short delay before retry
                         } else {
                             eprintln!("❌ Failed to execute query: {}\n🔴 Error: {}", request.query, err);
                             if let Some(sender) = request.result_sender {
                                 let _ = sender.send(-1);
                             }
-                            break; // ✅ Stop retrying on other errors
+                            break; // Stop retrying on other errors
                         }
                     }
                 }
@@ -83,7 +89,9 @@ pub fn execute_read_query<T, F>(
 where
     F: Fn(&rusqlite::Row) -> rusqlite::Result<T>,
 {
-    let conn = DB_CONN.lock().expect("Failed to lock database connection");
+    // Using the connection pool to get a connection
+    let conn = DB_POOL.get().map_err(|e| format!("❌ Failed to get DB connection: {}", e))?;
+
     let mut stmt = match conn.prepare(query) {
         Ok(stmt) => stmt,
         Err(err) => return Err(format!("❌ Failed to prepare query: {}", err)),
@@ -108,7 +116,6 @@ where
     Ok(results)
 }
 
-
 pub fn execute_write_query(query: &str, params: Vec<Box<dyn ToSql + Send + Sync>>) -> Result<i64, String> {
     let (sender, receiver) = std::sync::mpsc::channel();
     
@@ -125,4 +132,3 @@ pub fn execute_write_query(query: &str, params: Vec<Box<dyn ToSql + Send + Sync>
         Err(err) => Err(format!("❌ Failed to receive query result: {}", err)),
     }
 }
-

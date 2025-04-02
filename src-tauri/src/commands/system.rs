@@ -67,7 +67,7 @@ pub fn track_ram_usage() {
     });
 
     thread::spawn(|| {
-        let mut sys = System::new_all();
+        let sys = System::new_all();
 
         loop {
             thread::sleep(Duration::from_secs(60));
@@ -125,6 +125,6 @@ fn store_ram_usage(timestamp: String, min_ram: f64, max_ram: f64, avg_ram: f64, 
     if let Err(err) = execute_write_query(insert_query, params) {
         eprintln!("❌ Failed to insert RAM usage data: {}", err);
     } else {
-        println!("✅ RAM usage data stored successfully.");
+        // println!("✅ RAM usage data stored successfully.");
     }
 }

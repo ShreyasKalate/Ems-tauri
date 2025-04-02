@@ -97,7 +97,7 @@ pub fn insert_usb_device(device: &UsbDevice) {
     if let Err(err) = result {
         eprintln!("❌ Failed to insert USB device: {} (Vendor ID: {}, Product ID: {})", err, device.vendor_id, device.product_id);
     } else {
-        println!("✅ USB device inserted successfully (Vendor ID: {}, Product ID: {})", device.vendor_id, device.product_id);
+        // println!("✅ USB device inserted successfully (Vendor ID: {}, Product ID: {})", device.vendor_id, device.product_id);
     }
 }
 

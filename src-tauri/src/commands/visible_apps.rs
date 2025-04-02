@@ -2,7 +2,6 @@ use crate::commands::database::execute_write_query;
 use rusqlite::ToSql;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
-use chrono::Utc;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
@@ -57,8 +56,6 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 pub fn update_visible_apps_db() {
     let mut visible_apps: Vec<VisibleApp> = Vec::new();
     unsafe { EnumWindows(Some(enum_window_proc), LPARAM(&mut visible_apps as *mut _ as isize)); }
-
-    let now = Utc::now().timestamp();
 
     let query = "
         INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
