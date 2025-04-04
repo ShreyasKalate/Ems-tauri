@@ -1,10 +1,9 @@
-pub mod system;
-pub mod installed_apps;
+pub mod afk_tracker;
 pub mod browser;
-pub mod running_apps;
-pub mod visible_apps;
 pub mod capture_screen;
+pub mod installed_apps;
+pub mod running_apps;
+pub mod system;
 pub mod usb_devices;
 pub mod usb_monitor;
-pub mod afk_tracker;
-pub mod database;
+pub mod visible_apps;
