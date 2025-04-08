@@ -110,9 +110,8 @@ fn extract_from_registry(
             let version = subkey
                 .get_value::<String, _>("DisplayVersion")
                 .unwrap_or_else(|_| "Unknown".into());
-            
-            let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
+            let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
             app_list.push(InstalledApp {
                 identifying_number,

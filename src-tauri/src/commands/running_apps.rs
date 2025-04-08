@@ -1,80 +1,156 @@
-use chrono::{Duration, TimeZone, Utc};
-use chrono_tz::Asia::Kolkata;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Mutex;
+use chrono::{DateTime, Duration, TimeZone, Utc};
+use once_cell::sync::Lazy;
+use rusqlite::params;
+use std::{collections::HashSet, sync::Mutex};
 use sysinfo::System;
 
-lazy_static::lazy_static! {
-    static ref PROCESS_TIMES: Mutex<HashMap<String, (i64, i64)>> = Mutex::new(HashMap::new());
-    static ref EMS_LAUNCH_TIME: i64 = Utc::now().timestamp();
-}
+use crate::get_conn;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct RunningApp {
-    name: String,
-    pid: u32,
-    cpu_usage: f32,
-    memory_usage_mb: f64,  // Converted to MB for easier use in JSON
-    start_time: String,
-    running_time: String,
+    pub name: String,
+    pub pid: u32,
+    pub memory_usage_mb: f64,
+    pub start_time: String,
+    pub running_time: String,
+    pub last_updated: String,
 }
 
-#[tauri::command]
-pub fn get_running_apps() -> String {
+pub static EMS_LAUNCH_TIME: Lazy<i64> = Lazy::new(|| Utc::now().timestamp());
+pub static RUNNING_APPS_CACHE: Lazy<Mutex<Vec<RunningApp>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+pub fn create_table() {
+    let conn = get_conn();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS running_apps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            pid INTEGER,
+            memory_usage_mb REAL,
+            start_time TEXT,
+            running_time TEXT,
+            last_updated TEXT,
+            is_terminated BOOLEAN DEFAULT FALSE,
+            UNIQUE(pid, start_time)
+        )",
+        [],
+    )
+    .expect("❌ Failed to create running_apps table");
+}
+
+pub fn collect_info() -> Vec<RunningApp> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
-    let now_ist = Kolkata
-        .from_utc_datetime(&Utc::now().naive_utc())
-        .timestamp();
+    let now = Utc::now();
+    let now_ts = now.timestamp();
 
-    let mut process_times = PROCESS_TIMES.lock().unwrap();
+    let mut result = Vec::new();
 
-    let running_apps: Vec<RunningApp> = sys.processes()
-        .iter()
-        .map(|(pid, process)| {
-            let process_name = process.name().to_string_lossy().to_string();
-            let process_start_time = process.start_time() as i64;
+    for (pid, process) in sys.processes() {
+        let name = process.name().to_string_lossy().to_string();
+        let process_start_ts = process.start_time() as i64;
 
-            let adjusted_start_time =
-                if process_start_time == 0 || process_start_time < (*EMS_LAUNCH_TIME - 60) {
-                    *EMS_LAUNCH_TIME
-                } else {
-                    process_start_time
-                };
+        let adjusted_start_ts =
+            if process_start_ts == 0 || process_start_ts < (*EMS_LAUNCH_TIME - 60) {
+                *EMS_LAUNCH_TIME
+            } else {
+                process_start_ts
+            };
 
-            let ist_start_time = Kolkata
-                .timestamp(adjusted_start_time, 0)
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string();
+        let dt_start: DateTime<Utc> = Utc.timestamp_opt(adjusted_start_ts, 0).unwrap();
+        let start_time = dt_start.format("%Y-%m-%d %H:%M:%S").to_string();
 
-            // Get previous total time and last recorded time
-            let (previous_total_time, last_update) = process_times
-                .entry(process_name.clone())
-                .or_insert((0, now_ist));
+        let duration = Duration::seconds(now_ts - adjusted_start_ts);
+        let running_time = format!(
+            "{:02}:{:02}:{:02}",
+            duration.num_hours(),
+            duration.num_minutes() % 60,
+            duration.num_seconds() % 60
+        );
 
-            let elapsed_time = now_ist - *last_update;
+        let last_updated = now.format("%Y-%m-%d %H:%M:%S").to_string();
 
-            *previous_total_time += elapsed_time;
-            *last_update = now_ist;
+        result.push(RunningApp {
+            name,
+            pid: pid.as_u32(),
+            memory_usage_mb: process.memory() as f64 / 1024.0 / 1024.0,
+            start_time,
+            running_time,
+            last_updated,
+        });
+    }
 
-            let running_duration = Duration::seconds(*previous_total_time);
-            let hours = running_duration.num_hours();
-            let minutes = running_duration.num_minutes() % 60;
-            let seconds = running_duration.num_seconds() % 60;
-            let running_time = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+    result
+}
 
-            RunningApp {
-                name: process_name,
-                pid: pid.as_u32(),
-                cpu_usage: process.cpu_usage(),
-                memory_usage_mb: process.memory() as f64 / 1024.0 / 1024.0,  // Convert bytes to MB
-                start_time: ist_start_time,
-                running_time,
+pub fn push_to_cache(new_apps: Vec<RunningApp>) {
+    let mut cache = RUNNING_APPS_CACHE.lock().unwrap();
+    for app in new_apps {
+        match cache
+            .iter_mut()
+            .find(|a| a.pid == app.pid && a.start_time == app.start_time)
+        {
+            Some(existing) => {
+                existing.memory_usage_mb = app.memory_usage_mb;
+                existing.running_time = app.running_time.clone();
+                existing.last_updated = app.last_updated.clone();
             }
-        })
-        .collect();
+            None => cache.push(app),
+        }
+    }
+}
 
-    serde_json::to_string(&running_apps).unwrap_or_else(|_| "[]".to_string())
+pub fn flush_cache() {
+    let cache = RUNNING_APPS_CACHE.lock().unwrap();
+    if cache.is_empty() {
+        return;
+    }
+
+    let snapshot = cache.clone();
+    drop(cache);
+
+    let mut conn = get_conn();
+    let tx = conn.transaction().expect("❌ Failed to begin transaction");
+
+    let mut seen_keys = HashSet::new();
+
+    for app in &snapshot {
+        seen_keys.insert((app.pid, app.start_time.clone()));
+        tx.execute(
+            "INSERT INTO running_apps (
+                name, pid, memory_usage_mb,
+                start_time, running_time, last_updated, is_terminated
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, FALSE)
+            ON CONFLICT(pid, start_time) DO UPDATE SET
+                memory_usage_mb = excluded.memory_usage_mb,
+                running_time = excluded.running_time,
+                last_updated = excluded.last_updated,
+                is_terminated = FALSE",
+            params![
+                app.name,
+                app.pid,
+                app.memory_usage_mb,
+                app.start_time,
+                app.running_time,
+                app.last_updated,
+            ],
+        )
+        .unwrap();
+    }
+
+    // Fallback check for stale processes (not updated recently)
+    tx.execute(
+        "UPDATE running_apps
+         SET is_terminated = TRUE
+         WHERE is_terminated = FALSE
+         AND strftime('%s', 'now') - strftime('%s', last_updated) > 30",
+        [],
+    )
+    .unwrap();
+
+    tx.commit().
+        expect("❌ Failed to commit running_apps");
+    println!("✅ Flushed running apps to database");
 }

@@ -59,7 +59,7 @@ fn main() {
     // browser::create_table();
     // capture_screen::create_table();
     installed_apps::create_table();
-    // running_apps::create_table();
+    running_apps::create_table();
     system::create_table();
     // usb_monitor::create_table();
     // usb_devices::create_table();
@@ -85,6 +85,27 @@ fn main() {
             thread::sleep(Duration::from_secs(60));
         }
     });
+
+    // Running apps thread (every 5s, flush every 15s)
+    thread::spawn(|| {
+        let mut tick = 0;
+        loop {
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                running_apps::flush_cache();
+                break;
+            }
+    
+            let data = running_apps::collect_info();
+            running_apps::push_to_cache(data);
+    
+            tick += 1;
+            if tick % 3 == 0 {
+                running_apps::flush_cache();
+            }
+    
+            thread::sleep(std::time::Duration::from_secs(5));
+        }
+    });    
 
     // System thread (every 5s, flush every 15s)
     thread::spawn(|| {
@@ -143,7 +164,6 @@ fn main() {
     // tauri::Builder::default()
     //     .invoke_handler(tauri::generate_handler![
     //         afk_tracker::get_afk_status,
-    //         running_apps::get_running_apps,
     //         browser::get_browser_history,
     //         capture_screen::get_capture_screen,
     //         usb_devices::list_usb_devices,
