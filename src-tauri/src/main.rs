@@ -13,7 +13,6 @@ use std::{
 };
 
 mod commands;
-
 use commands::{
     afk_tracker,
     browser,
@@ -57,13 +56,25 @@ fn main() {
 
     // afk_tracker::create_table();
     // browser::create_table();
-    // capture_screen::create_table();
     installed_apps::create_table();
     running_apps::create_table();
     system::create_table();
     // usb_monitor::create_table();
     // usb_devices::create_table();
     // visible_apps::create_table();
+
+    // Screenshot thread (every 10 min)
+    thread::spawn(|| {
+        loop {
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                break;
+            }
+
+            capture_screen::collect_info();
+
+            thread::sleep(Duration::from_secs(600));
+        }
+    });
 
     // Installed apps thread (every 60s, flush every 1 mins)
     thread::spawn(|| {
@@ -149,11 +160,6 @@ fn main() {
     //     }
     // });
 
-    // // Background modules with their own thread
-    // thread::spawn(|| {
-    //     capture_screen::collect_and_store(); // loops internally
-    // });
-
     // thread::spawn(|| {
     //     usb_monitor::collect_and_store(); // loops internally
     // });
@@ -165,7 +171,6 @@ fn main() {
     //     .invoke_handler(tauri::generate_handler![
     //         afk_tracker::get_afk_status,
     //         browser::get_browser_history,
-    //         capture_screen::get_capture_screen,
     //         usb_devices::list_usb_devices,
     //         usb_monitor::monitor_usb_file_transfers,
     //     ])
@@ -187,6 +192,7 @@ fn main() {
     // Final cleanup
     installed_apps::flush_cache();
     system::flush_cache();
+    running_apps::flush_cache();
 
     // visible_apps::flush_cache();
     // usb_monitor::flush_cache();

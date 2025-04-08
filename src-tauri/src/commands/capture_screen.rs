@@ -1,62 +1,53 @@
+use chrono::Utc;
+use image::{DynamicImage::ImageRgba8, ImageOutputFormat::Png};
 use screenshots::Screen;
-use std::fs::{create_dir_all, File};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-use image::{DynamicImage, ImageOutputFormat, imageops::FilterType};
-use chrono::prelude::*; // For handling IST time
-use tokio::time;
-use tauri::command;
+use std::{
+    fs::{create_dir_all, File},
+    path::Path
+};
 
-/// Directory to save screenshots
-const SCREENSHOT_DIR: &str = "D:\\Meltx\\emsScreenshots";
+const SCREENSHOT_DIR: &str = "C:\\Users\\shail\\Desktop\\Meltx\\screen_captures";
 
-/// Captures the current screen, compresses it, and saves the screenshot.
-#[command]
-pub async fn get_capture_screen() -> Result<String, String> {
-    // Ensure the directory exists
+// SS from all available screens.
+pub fn collect_info() -> Vec<String> {
+    let mut saved_paths = Vec::new();
+
     let screenshot_path = Path::new(SCREENSHOT_DIR);
     if !screenshot_path.exists() {
-        create_dir_all(screenshot_path).map_err(|e| e.to_string())?;
+        create_dir_all(screenshot_path).expect("Failed to create screenshot directory");
     }
 
-    // Get all screens and select the primary one
-    let screens = Screen::all().map_err(|e| e.to_string())?;
-    let screen = screens.get(0).ok_or("No screen found")?;
-    
-    // Capture the screen image
-    let image = screen.capture().map_err(|e| e.to_string())?;
-    let img = DynamicImage::ImageRgba8(image.into());
-
-    // Resize the image to reduce size (scale down to 720x480)
-    let resized_img = img.resize_exact(720, 480, FilterType::Lanczos3);
-
-    // Get current time in IST
+    let screens = Screen::all().expect("Failed to get screen list");
     let now_utc = Utc::now();
-    let now_ist = now_utc.with_timezone(&FixedOffset::east_opt(5 * 3600 + 1800).unwrap());
-    let formatted_time = now_ist.format("%Y-%m-%d_%H-%M-%S").to_string();
+    let timestamp = now_utc.format("%Y-%m-%d_%H-%M-%S").to_string();
 
-    // Generate filename with IST timestamp
-    let filename = format!("screenshot-{}.jpg", formatted_time);
-    let filepath: PathBuf = screenshot_path.join(&filename);
+    for (i, screen) in screens.iter().enumerate() {
+        match screen.capture() {
+            Ok(image) => {
+                let img = ImageRgba8(image.into());
 
-    // Compress and save as JPEG (Quality: 70%)
-    let mut output_file = File::create(&filepath).map_err(|e| e.to_string())?;
-    resized_img.write_to(&mut output_file, ImageOutputFormat::Jpeg(70)) // Adjust quality 40-50KB
-        .map_err(|e| e.to_string())?;
+                // Filename: screenshot-YYYY-MM-DD_HH-MM-SS_1.png
+                let filename = format!("username-{}_{}.png", timestamp, i + 1);
+                let filepath = screenshot_path.join(&filename);
 
-    Ok(filepath.to_string_lossy().to_string())
-}
-
-/// Starts a background scheduler that captures compressed screenshots every 10 minutes.
-pub async fn start_screenshot_scheduler() {
-    tokio::spawn(async {
-        let mut interval = time::interval(Duration::from_secs(600)); // 10 minutes
-        loop {
-            interval.tick().await;
-            match get_capture_screen().await {
-                Ok(filepath) => println!("Compressed screenshot saved at: {}", filepath),
-                Err(e) => eprintln!("Failed to capture screenshot: {}", e),
+                match File::create(&filepath) {
+                    Ok(mut file) => {
+                        if img
+                            .write_to(&mut file, Png)
+                            .is_ok()
+                        {
+                            println!("🖼️ Saved: {}", filepath.to_string_lossy());
+                            saved_paths.push(filepath.to_string_lossy().to_string());
+                        } else {
+                            eprintln!("❌ Failed to write image to disk: {}", filename);
+                        }
+                    }
+                    Err(e) => eprintln!("❌ Could not create file {}: {}", filename, e),
+                }
             }
+            Err(e) => eprintln!("❌ Failed to capture screen {}: {}", i, e),
         }
-    });
+    }
+
+    saved_paths
 }
