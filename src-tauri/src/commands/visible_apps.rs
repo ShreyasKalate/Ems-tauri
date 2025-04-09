@@ -1,100 +1,204 @@
-use rusqlite::{params, Connection};
-use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::Win32::Foundation::{HWND, LPARAM, BOOL};
-use std::sync::Mutex;
-use chrono::Utc;
-use serde::{Serialize, Deserialize};
+use once_cell::sync::Lazy;
+use rusqlite::params;
+use std::{collections::HashMap, sync::Mutex};
+use sysinfo::{Pid, System};
+use windows::Win32::{
+    Foundation::{BOOL, HWND, LPARAM},
+    UI::WindowsAndMessaging::*,
+};
 
-lazy_static::lazy_static! {
-    static ref DB_CONN: Mutex<Connection> = Mutex::new(
-        Connection::open("ems_data_visible.db").expect("Failed to open database")
-    );
+use crate::get_conn;
+
+#[derive(Clone, Debug)]
+pub struct VisibleWindow {
+    pub app: String,
+    pub window_title: String,
+    pub pid: u32,
 }
 
-#[derive(Serialize, Deserialize)]
-struct VisibleApp {
-    pid: u32,
-    name: String,
-    window_title: String,
-    curr_session: i64,
-    total_usage: i64,
-    top_usage: i64,
+#[derive(Default, Clone, Debug)]
+pub struct WindowStat {
+    pub pid: u32, // Used for visible_windows
+    pub total_usage: u64,
+    pub top_usage: u64,
 }
 
-pub fn init_db() {
-    let conn = DB_CONN.lock().unwrap();
+pub static APP_USAGE_CACHE: Lazy<Mutex<HashMap<String, WindowStat>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub static WINDOW_USAGE_CACHE: Lazy<Mutex<HashMap<(String, String), WindowStat>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub fn create_table() {
+    let conn = get_conn();
     conn.execute(
         "CREATE TABLE IF NOT EXISTS visible_apps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pid INTEGER,
-            name TEXT,
-            window_title TEXT,
-            curr_session INTEGER, 
-            total_usage INTEGER, 
-            top_usage INTEGER, 
-            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(pid, name, window_title)
+            app TEXT UNIQUE,
+            total_usage INTEGER DEFAULT 0,
+            top_usage INTEGER DEFAULT 0
         )",
         [],
-    ).expect("Failed to create visible_apps table");
+    )
+    .expect("❌ Failed to create visible_apps table");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS visible_windows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app TEXT,
+            window_title TEXT,
+            pid INTEGER,
+            total_usage INTEGER DEFAULT 0,
+            top_usage INTEGER DEFAULT 0,
+            UNIQUE(app, window_title)
+        )",
+        [],
+    )
+    .expect("❌ Failed to create visible_windows table");
 }
 
 unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let visible_apps = &mut *(lparam.0 as *mut Vec<VisibleApp>);
+    let windows = &mut *(lparam.0 as *mut Vec<VisibleWindow>);
+    if !IsWindowVisible(hwnd).as_bool() {
+        return true.into();
+    }
+
     let mut title = [0u16; 512];
     let len = GetWindowTextW(hwnd, &mut title);
+    if len == 0 {
+        return true.into();
+    }
 
-    if IsWindowVisible(hwnd).as_bool() && len > 0 {
-        let window_title = String::from_utf16_lossy(&title[..len as usize]);
-        let mut pid = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    let window_title = String::from_utf16_lossy(&title[..len as usize]);
+    let mut pid = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
 
-        visible_apps.push(VisibleApp {
-            pid,
-            name: window_title.clone(),
+    let app = get_process_name(pid);
+    if !app.is_empty() {
+        windows.push(VisibleWindow {
+            app,
             window_title,
-            curr_session: 0,
-            total_usage: 0,
-            top_usage: 0,
+            pid,
         });
     }
+
     true.into()
 }
 
-pub fn update_visible_apps_db() {
-    let conn = DB_CONN.lock().unwrap();
-    let mut visible_apps: Vec<VisibleApp> = Vec::new();
-    unsafe { EnumWindows(Some(enum_window_proc), LPARAM(&mut visible_apps as *mut _ as isize)); }
-
-    let now = Utc::now().timestamp();
-    for app in visible_apps {
-        conn.execute(
-            "INSERT INTO visible_apps (pid, name, window_title, curr_session, total_usage, top_usage, last_seen) 
-             VALUES (?1, ?2, ?3, 0, 0, 0, CURRENT_TIMESTAMP) 
-             ON CONFLICT(pid, name, window_title) DO UPDATE 
-             SET curr_session = curr_session + 1, 
-                 total_usage = total_usage + 1, 
-                 top_usage = CASE WHEN ?4 THEN top_usage + 1 ELSE top_usage END, 
-                 last_seen = CURRENT_TIMESTAMP",
-            params![app.pid, app.name, app.window_title, is_topmost_window(app.pid)],
-        ).expect("Failed to insert/update visible app");
-    }
+fn get_process_name(pid: u32) -> String {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    sys.process(Pid::from(pid as usize))
+        .map(|p| {
+            let full = p.name().to_string_lossy().to_string();
+            full.split('.').next().unwrap_or("").to_lowercase()
+        })
+        .unwrap_or_default()
 }
 
-/// **Checks if the window is the topmost active window**
+pub fn collect_info() -> Vec<VisibleWindow> {
+    let mut windows = Vec::new();
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_window_proc),
+            LPARAM(&mut windows as *mut _ as isize),
+        );
+    }
+    windows
+}
+
 fn is_topmost_window(pid: u32) -> bool {
     unsafe {
-        let foreground_hwnd = GetForegroundWindow();
-        let mut foreground_pid = 0;
-        GetWindowThreadProcessId(foreground_hwnd, Some(&mut foreground_pid));
-        pid == foreground_pid
+        let hwnd = GetForegroundWindow();
+        let mut fg_pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut fg_pid));
+        pid == fg_pid
     }
 }
 
-pub fn track_visible_apps() {
-    init_db();
-    std::thread::spawn(|| loop {
-        update_visible_apps_db();
-        std::thread::sleep(std::time::Duration::from_secs(1)); // Auto-update every second
-    });
+pub fn push_to_cache(windows: Vec<VisibleWindow>) {
+    let mut app_cache = APP_USAGE_CACHE.lock().unwrap();
+    let mut window_cache = WINDOW_USAGE_CACHE.lock().unwrap();
+
+    let mut seen_apps: HashMap<String, bool> = HashMap::new();
+    let mut app_top: HashMap<String, bool> = HashMap::new();
+
+    for win in &windows {
+        let is_top = is_topmost_window(win.pid);
+        let top = if is_top { 1 } else { 0 };
+
+        // Per-window
+        window_cache
+            .entry((win.app.clone(), win.window_title.clone()))
+            .and_modify(|entry| {
+                entry.total_usage += 1;
+                entry.top_usage += top;
+                entry.pid = win.pid;
+            })
+            .or_insert(WindowStat {
+                pid: win.pid,
+                total_usage: 1,
+                top_usage: top,
+            });
+
+        // Per-app
+        seen_apps.insert(win.app.clone(), true);
+        if is_top {
+            app_top.insert(win.app.clone(), true);
+        }
+    }
+
+    for app in seen_apps.keys() {
+        let top = if app_top.get(app).copied().unwrap_or(false) {
+            1
+        } else {
+            0
+        };
+        app_cache
+            .entry(app.clone())
+            .and_modify(|entry| {
+                entry.total_usage += 1;
+                entry.top_usage += top;
+            })
+            .or_insert(WindowStat {
+                pid: 0,
+                total_usage: 1,
+                top_usage: top,
+            });
+    }
+}
+
+pub fn flush_cache() {
+    let mut app_cache = APP_USAGE_CACHE.lock().unwrap();
+    let mut window_cache = WINDOW_USAGE_CACHE.lock().unwrap();
+
+    let mut conn = get_conn();
+    let tx = conn.transaction().expect("❌ Failed to start transaction");
+
+    for ((app, title), stat) in window_cache.drain() {
+        tx.execute(
+            "INSERT INTO visible_windows (app, window_title, pid, total_usage, top_usage)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(app, window_title) DO UPDATE SET
+               total_usage = total_usage + ?4,
+               top_usage = top_usage + ?5,
+               pid = excluded.pid",
+            params![app, title, stat.pid, stat.total_usage, stat.top_usage],
+        )
+        .unwrap();
+    }
+
+    for (app, stat) in app_cache.drain() {
+        tx.execute(
+            "INSERT INTO visible_apps (app, total_usage, top_usage)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(app) DO UPDATE SET
+               total_usage = total_usage + ?2,
+               top_usage = top_usage + ?3",
+            params![app, stat.total_usage, stat.top_usage],
+        )
+        .unwrap();
+    }
+
+    tx.commit().expect("❌ Failed to commit aggregated usage");
 }

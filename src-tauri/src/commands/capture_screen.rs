@@ -3,7 +3,7 @@ use image::{DynamicImage::ImageRgba8, ImageOutputFormat::Png};
 use screenshots::Screen;
 use std::{
     fs::{create_dir_all, File},
-    path::Path
+    path::Path,
 };
 
 const SCREENSHOT_DIR: &str = "C:\\Users\\shail\\Desktop\\Meltx\\screen_captures";
@@ -34,9 +34,8 @@ pub fn collect_info() -> Vec<String> {
                     Ok(mut file) => {
                         if img
                             .write_to(&mut file, Png)
-                            .is_ok()
-                        {
-                            println!("🖼️ Saved: {}", filepath.to_string_lossy());
+                            .is_ok() {
+                            println!("Saved: {}", filepath.to_string_lossy());
                             saved_paths.push(filepath.to_string_lossy().to_string());
                         } else {
                             eprintln!("❌ Failed to write image to disk: {}", filename);

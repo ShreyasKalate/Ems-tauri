@@ -59,9 +59,9 @@ fn main() {
     installed_apps::create_table();
     running_apps::create_table();
     system::create_table();
-    // usb_monitor::create_table();
     // usb_devices::create_table();
-    // visible_apps::create_table();
+    // usb_monitor::create_table();
+    visible_apps::create_table();
 
     // Screenshot thread (every 10 min)
     thread::spawn(|| {
@@ -139,26 +139,26 @@ fn main() {
         }
     });
 
-    // Visible apps thread (every 10s, flush every 60s)
-    // thread::spawn(|| {
-    //     let mut tick = 0;
-    //     loop {
-    //         if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
-    //             visible_apps::flush_cache();
-    //             break;
-    //         }
+    // Visible apps thread (every 1s, flush every 3s)
+    thread::spawn(|| {
+        let mut tick = 0;
+        loop {
+            if SHUTDOWN_FLAG.load(Ordering::SeqCst) {
+                visible_apps::flush_cache();
+                break;
+            }
 
-    //         let data = visible_apps::collect_info();
-    //         visible_apps::push_to_cache(data);
+            let data = visible_apps::collect_info();
+            visible_apps::push_to_cache(data);
 
-    //         tick += 1;
-    //         if tick % 6 == 0 {
-    //             visible_apps::flush_cache();
-    //         }
+            tick += 1;
+            if tick % 5 == 0 {
+                visible_apps::flush_cache();
+            }
 
-    //         thread::sleep(Duration::from_secs(10));
-    //     }
-    // });
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
 
     // thread::spawn(|| {
     //     usb_monitor::collect_and_store(); // loops internally
@@ -190,12 +190,15 @@ fn main() {
     }
 
     // Final cleanup
-    installed_apps::flush_cache();
-    system::flush_cache();
-    running_apps::flush_cache();
 
-    // visible_apps::flush_cache();
+    // afk_tracker::flush_cache();
+    // browser::flush_cache();
+    installed_apps::flush_cache();
+    running_apps::flush_cache();
+    system::flush_cache();
+    // usb_devices::flush_cache();
     // usb_monitor::flush_cache();
+    visible_apps::flush_cache();
 
     println!("✅ Shutdown complete. Everything flushed.");
 }
